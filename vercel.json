@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "functions": {
+    "api/interpretar.js": {
+      "maxDuration": 10
+    }
+  }
+}
