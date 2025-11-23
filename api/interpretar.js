@@ -1,4 +1,4 @@
-// /api/interpretar.js
+// /ap/interpretar.js
 import Groq from "groq-sdk";
 import { pool } from "../db.js";
 
