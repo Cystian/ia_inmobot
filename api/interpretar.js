@@ -1,6 +1,36 @@
 import Groq from "groq-sdk";
 import { pool } from "../db.js";
 
+// 🟩 Mapeo profesional de modalidad → status real de tu BD
+function mapModalidadToStatus(text) {
+  if (!text) return "";
+
+  text = text.toLowerCase();
+
+  // Detecta ALQUILER
+  if (
+    text.includes("alquiler") ||
+    text.includes("alquilar") ||
+    text.includes("rentar") ||
+    text.includes("arrendar") ||
+    text.includes("arriendo")
+  ) {
+    return "alquiler";
+  }
+
+  // Detecta VENTA
+  if (
+    text.includes("venta") ||
+    text.includes("comprar") ||
+    text.includes("vendo") ||
+    text.includes("en venta")
+  ) {
+    return "venta";
+  }
+
+  return "";
+}
+
 const client = new Groq({
   apiKey: process.env.GROQ_API_KEY
 });
@@ -10,20 +40,21 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Método no permitido" });
   }
 
-  const { user_message, user_phone } = req.body;
+  const { user_message, user_phone } = req.body || {};
 
-  // Prompt MEJORADO para que SIEMPRE detecte intención
+  // 🟦 Prompt mejorado (IA SIEMPRE detecta intención si hay filtros)
   const prompt = `
-Eres un asistente inmobiliario especializado en Perú.
+Eres un asistente inmobiliario profesional del Perú.
 Siempre debes identificar la intención del usuario.
 
-Si el usuario menciona distrito, precio, modalidad (alquiler/venta), dormitorios,
-o cualquier criterio de búsqueda, entonces:
+Si el usuario menciona distrito, precio, modalidad (alquiler/venta), dormitorios
+o cualquier criterio de búsqueda, entonces escribe:
 
-- "intencion": "buscar_propiedades"
-- completar los campos dentro de "filtros" según lo que se entienda del mensaje
+"intencion": "buscar_propiedades"
 
-Debes devolver SOLO JSON válido, exactamente este formato:
+Y completa los filtros detectados.
+
+Devuelve SOLO JSON válido con este formato EXACTO:
 
 {
   "intencion": "",
@@ -36,16 +67,17 @@ Debes devolver SOLO JSON válido, exactamente este formato:
   "respuesta": ""
 }
 
-Reglas estrictas:
-- NO agregues texto fuera del JSON
-- NO agregues explicaciones
-- NO devuelvas comentarios
-- NO devuelvas nada fuera del objeto JSON
+Reglas:
+- NO devuelvas texto fuera del JSON
+- NO expliques nada
+- NO comentes
+- SOLO JSON puro
 
 Mensaje del usuario: "${user_message}"
   `;
 
   try {
+    // 🟦 Llama 3.1 (modelo nuevo y estable)
     const completion = await client.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
@@ -66,20 +98,31 @@ Mensaje del usuario: "${user_message}"
       });
     }
 
+    // ================================
+    // 🟩 2. SQL DINÁMICO REAL
+    // ================================
     let propiedades = [];
 
     if (result.intencion === "buscar_propiedades") {
       let query = "SELECT * FROM properties WHERE 1=1";
 
-      if (result.filtros.modalidad) {
-        query += ` AND modalidad = '${result.filtros.modalidad}'`;
+      // FILTRAR POR STATUS (mapModalidadToStatus)
+      const statusMapped = mapModalidadToStatus(result.filtros.modalidad);
+      if (statusMapped) {
+        query += ` AND status = '${statusMapped}'`;
       }
+
+      // FILTRAR POR DISTRITO
       if (result.filtros.distrito) {
         query += ` AND distrito LIKE '%${result.filtros.distrito}%'`;
       }
+
+      // FILTRAR POR DORMITORIOS
       if (result.filtros.bedrooms) {
         query += ` AND bedrooms >= ${result.filtros.bedrooms}`;
       }
+
+      // FILTRAR POR PRECIO MÁXIMO
       if (result.filtros.precio_max) {
         query += ` AND price <= ${result.filtros.precio_max}`;
       }
@@ -88,13 +131,23 @@ Mensaje del usuario: "${user_message}"
       propiedades = rows;
     }
 
-    let respuesta = result.respuesta || "Perfecto, dime qué características buscas.";
+    // ================================
+    // 🟦 3. Construcción de respuesta
+    // ================================
+    let respuesta = result.respuesta || "Perfecto, cuéntame qué tipo de propiedad buscas.";
 
     if (propiedades.length > 0) {
-      respuesta += `\n\nEncontré ${propiedades.length} opciones:\n\n`;
+      respuesta += `\n\nEncontré ${propiedades.length} propiedades:\n\n`;
+
       propiedades.slice(0, 3).forEach((p) => {
-        respuesta += `🏡 ${p.title}\n💵 S/${p.price}\n📍 ${p.location}\n🔗 https://tuweb.com/detalle/${p.id}\n\n`;
+        respuesta +=
+          `🏡 ${p.title}\n` +
+          `💵 S/${p.price}\n` +
+          `📍 ${p.location}\n` +
+          `🔗 https://tuweb.com/detalle/${p.id}\n\n`;
       });
+    } else if (result.intencion === "buscar_propiedades") {
+      respuesta += "\n\nNo encontré propiedades con esas características. ¿Quieres probar otra zona o precio?";
     }
 
     return res.status(200).json({ respuesta });
