@@ -12,13 +12,19 @@ export default async function handler(req, res) {
 
   const { user_message, user_phone } = req.body;
 
-  try {
-    // 1️⃣ Prompt base
-    const prompt = `
-Eres un asistente inmobiliario del Perú.
-Devuelve SOLO JSON válido.
+  // Prompt MEJORADO para que SIEMPRE detecte intención
+  const prompt = `
+Eres un asistente inmobiliario especializado en Perú.
+Siempre debes identificar la intención del usuario.
 
-Formato EXACTO:
+Si el usuario menciona distrito, precio, modalidad (alquiler/venta), dormitorios,
+o cualquier criterio de búsqueda, entonces:
+
+- "intencion": "buscar_propiedades"
+- completar los campos dentro de "filtros" según lo que se entienda del mensaje
+
+Debes devolver SOLO JSON válido, exactamente este formato:
+
 {
   "intencion": "",
   "filtros": {
@@ -30,10 +36,16 @@ Formato EXACTO:
   "respuesta": ""
 }
 
-Mensaje del usuario: "${user_message}"
-    `;
+Reglas estrictas:
+- NO agregues texto fuera del JSON
+- NO agregues explicaciones
+- NO devuelvas comentarios
+- NO devuelvas nada fuera del objeto JSON
 
-    // 2️⃣ Llamado IA con modelo actualizado
+Mensaje del usuario: "${user_message}"
+  `;
+
+  try {
     const completion = await client.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
@@ -42,19 +54,18 @@ Mensaje del usuario: "${user_message}"
       ]
     });
 
-    // 3️⃣ Extraer JSON
+    const raw = completion.choices[0].message.content;
+
     let result;
     try {
-      result = JSON.parse(completion.choices[0].message.content);
+      result = JSON.parse(raw);
     } catch (err) {
-      console.log("Error parseando JSON:", err);
       return res.status(400).json({
         error: "Respuesta IA inválida",
-        raw: completion.choices[0].message.content
+        raw
       });
     }
 
-    // 4️⃣ Ejecutar búsqueda SQL si corresponde
     let propiedades = [];
 
     if (result.intencion === "buscar_propiedades") {
@@ -63,15 +74,12 @@ Mensaje del usuario: "${user_message}"
       if (result.filtros.modalidad) {
         query += ` AND modalidad = '${result.filtros.modalidad}'`;
       }
-
       if (result.filtros.distrito) {
         query += ` AND distrito LIKE '%${result.filtros.distrito}%'`;
       }
-
       if (result.filtros.bedrooms) {
         query += ` AND bedrooms >= ${result.filtros.bedrooms}`;
       }
-
       if (result.filtros.precio_max) {
         query += ` AND price <= ${result.filtros.precio_max}`;
       }
@@ -80,12 +88,10 @@ Mensaje del usuario: "${user_message}"
       propiedades = rows;
     }
 
-    // 5️⃣ Construir respuesta final
-    let respuesta = result.respuesta || "Perfecto, cuéntame qué tipo de propiedad buscas.";
+    let respuesta = result.respuesta || "Perfecto, dime qué características buscas.";
 
     if (propiedades.length > 0) {
       respuesta += `\n\nEncontré ${propiedades.length} opciones:\n\n`;
-
       propiedades.slice(0, 3).forEach((p) => {
         respuesta += `🏡 ${p.title}\n💵 S/${p.price}\n📍 ${p.location}\n🔗 https://tuweb.com/detalle/${p.id}\n\n`;
       });
@@ -94,7 +100,6 @@ Mensaje del usuario: "${user_message}"
     return res.status(200).json({ respuesta });
 
   } catch (error) {
-    console.error("Error general:", error);
     return res.status(500).json({
       error: "Error general procesando solicitud",
       details: error.message
