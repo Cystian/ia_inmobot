@@ -1,13 +1,15 @@
 import Groq from "groq-sdk";
 import { pool } from "../db.js";
 
-// 🟩 Mapeo profesional de modalidad → status real de tu BD
+// ======================================================
+//  MAPEO PROFESIONAL DE MODALIDAD → status (TU BD REAL)
+// ======================================================
 function mapModalidadToStatus(text) {
   if (!text) return "";
 
   text = text.toLowerCase();
 
-  // Detecta ALQUILER
+  // ALQUILER
   if (
     text.includes("alquiler") ||
     text.includes("alquilar") ||
@@ -18,7 +20,7 @@ function mapModalidadToStatus(text) {
     return "alquiler";
   }
 
-  // Detecta VENTA
+  // VENTA
   if (
     text.includes("venta") ||
     text.includes("comprar") ||
@@ -31,6 +33,9 @@ function mapModalidadToStatus(text) {
   return "";
 }
 
+// ======================================================
+//  IA (Groq)
+// ======================================================
 const client = new Groq({
   apiKey: process.env.GROQ_API_KEY
 });
@@ -42,19 +47,21 @@ export default async function handler(req, res) {
 
   const { user_message, user_phone } = req.body || {};
 
-  // 🟦 Prompt mejorado (IA SIEMPRE detecta intención si hay filtros)
+  // ======================================================
+  //  PROMPT MEJORADO (YA ADAPTADO A TU BD)
+  // ======================================================
   const prompt = `
-Eres un asistente inmobiliario profesional del Perú.
+Eres un asistente inmobiliario del Perú.
 Siempre debes identificar la intención del usuario.
 
-Si el usuario menciona distrito, precio, modalidad (alquiler/venta), dormitorios
-o cualquier criterio de búsqueda, entonces escribe:
+Si el usuario menciona distrito, precio, modalidad (venta/alquiler),
+dormitorios, baños o cualquier criterio inmobiliario, entonces:
 
 "intencion": "buscar_propiedades"
 
-Y completa los filtros detectados.
+Y llenar los filtros SIEMPRE que se puedan inferir del mensaje.
 
-Devuelve SOLO JSON válido con este formato EXACTO:
+Debes devolver SOLO JSON válido:
 
 {
   "intencion": "",
@@ -67,17 +74,19 @@ Devuelve SOLO JSON válido con este formato EXACTO:
   "respuesta": ""
 }
 
-Reglas:
-- NO devuelvas texto fuera del JSON
-- NO expliques nada
-- NO comentes
+Reglas estrictas:
 - SOLO JSON puro
+- NO agregues texto fuera
+- NO comentarios
+- NO explicaciones
 
 Mensaje del usuario: "${user_message}"
-  `;
+`;
 
   try {
-    // 🟦 Llama 3.1 (modelo nuevo y estable)
+    // ======================================================
+    //  IA GROQ (MODELO ACTUAL)
+    // ======================================================
     const completion = await client.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
@@ -93,36 +102,36 @@ Mensaje del usuario: "${user_message}"
       result = JSON.parse(raw);
     } catch (err) {
       return res.status(400).json({
-        error: "Respuesta IA inválida",
+        error: "JSON inválido devuelto por la IA",
         raw
       });
     }
 
-    // ================================
-    // 🟩 2. SQL DINÁMICO REAL
-    // ================================
+    // ======================================================
+    //  SQL DINÁMICO SEGÚN TU BD REAL
+    // ======================================================
     let propiedades = [];
 
     if (result.intencion === "buscar_propiedades") {
       let query = "SELECT * FROM properties WHERE 1=1";
 
-      // FILTRAR POR STATUS (mapModalidadToStatus)
+      // STATUS (venta / alquiler)
       const statusMapped = mapModalidadToStatus(result.filtros.modalidad);
       if (statusMapped) {
         query += ` AND status = '${statusMapped}'`;
       }
 
-      // FILTRAR POR DISTRITO
+      // DISTRITO (location)
       if (result.filtros.distrito) {
-        query += ` AND distrito LIKE '%${result.filtros.distrito}%'`;
+        query += ` AND location LIKE '%${result.filtros.distrito}%'`;
       }
 
-      // FILTRAR POR DORMITORIOS
+      // BEDROOMS
       if (result.filtros.bedrooms) {
         query += ` AND bedrooms >= ${result.filtros.bedrooms}`;
       }
 
-      // FILTRAR POR PRECIO MÁXIMO
+      // PRECIO MAX
       if (result.filtros.precio_max) {
         query += ` AND price <= ${result.filtros.precio_max}`;
       }
@@ -131,23 +140,24 @@ Mensaje del usuario: "${user_message}"
       propiedades = rows;
     }
 
-    // ================================
-    // 🟦 3. Construcción de respuesta
-    // ================================
-    let respuesta = result.respuesta || "Perfecto, cuéntame qué tipo de propiedad buscas.";
+    // ======================================================
+    //  RESPUESTA FINAL
+    // ======================================================
+    let respuesta = result.respuesta || "Perfecto, ¿en qué distrito y qué modalidad buscas?";
 
     if (propiedades.length > 0) {
-      respuesta += `\n\nEncontré ${propiedades.length} propiedades:\n\n`;
+      respuesta += `\n\nEncontré ${propiedades.length} opciones:\n\n`;
 
       propiedades.slice(0, 3).forEach((p) => {
         respuesta +=
           `🏡 ${p.title}\n` +
-          `💵 S/${p.price}\n` +
+          `💵 ${p.moneda}${p.price}\n` +
           `📍 ${p.location}\n` +
+          `🛏 ${p.bedrooms} | 🚿 ${p.bathrooms} | 🚗 ${p.cocheras}\n` +
           `🔗 https://tuweb.com/detalle/${p.id}\n\n`;
       });
     } else if (result.intencion === "buscar_propiedades") {
-      respuesta += "\n\nNo encontré propiedades con esas características. ¿Quieres probar otra zona o precio?";
+      respuesta += "\n\nNo encontré propiedades con esos filtros. ¿Quieres probar otro distrito o precio?";
     }
 
     return res.status(200).json({ respuesta });
