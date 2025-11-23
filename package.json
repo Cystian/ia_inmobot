@@ -10,6 +10,7 @@
     "express": "latest",
     "mysql2": "latest",
     "openai": "latest",
+"groq-sdk": "latest",
     "dotenv": "latest",
     "cors": "latest"
   }
