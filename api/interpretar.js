@@ -6,22 +6,19 @@ const client = new Groq({
 });
 
 export default async function handler(req, res) {
-  console.log("📌 Endpoint /interpretar recibió una solicitud");
-
   if (req.method !== "POST") {
-    console.log("❌ Método no permitido:", req.method);
     return res.status(405).json({ error: "Método no permitido" });
   }
 
-  console.log("📌 Body recibido:", req.body);
-
   const { user_message, user_phone } = req.body;
 
-  // Prompt
-  const prompt = `
+  try {
+    // 1️⃣ Prompt base
+    const prompt = `
 Eres un asistente inmobiliario del Perú.
-Devuelve SOLO JSON puro con este formato EXACTO:
+Devuelve SOLO JSON válido.
 
+Formato EXACTO:
 {
   "intencion": "",
   "filtros": {
@@ -34,40 +31,30 @@ Devuelve SOLO JSON puro con este formato EXACTO:
 }
 
 Mensaje del usuario: "${user_message}"
-  `;
+    `;
 
-  try {
-    console.log("📌 Llamando a Groq...");
-
+    // 2️⃣ Llamado IA con modelo actualizado
     const completion = await client.chat.completions.create({
-      model: "llama3-8b-8192",
+      model: "llama-3.1-8b-instant",
       messages: [
-        { role: "system", content: "Eres un asesor inmobiliario profesional del mercado peruano." },
+        { role: "system", content: "Eres un asesor inmobiliario experto del Perú." },
         { role: "user", content: prompt }
       ]
     });
 
-    console.log("📌 Respuesta cruda de Groq:", completion);
-
-    const raw = completion.choices?.[0]?.message?.content;
-    console.log("📌 Texto recibido de Groq:", raw);
-
+    // 3️⃣ Extraer JSON
     let result;
-
     try {
-      result = JSON.parse(raw);
-    } catch (e) {
-      console.log("❌ Error parseando JSON:", e);
-      return res.status(500).json({
-        error: "Groq devolvió un JSON inválido",
-        raw_response: raw,
-        parse_error: e.message
+      result = JSON.parse(completion.choices[0].message.content);
+    } catch (err) {
+      console.log("Error parseando JSON:", err);
+      return res.status(400).json({
+        error: "Respuesta IA inválida",
+        raw: completion.choices[0].message.content
       });
     }
 
-    console.log("📌 JSON parseado correctamente:", result);
-
-    // SQL
+    // 4️⃣ Ejecutar búsqueda SQL si corresponde
     let propiedades = [];
 
     if (result.intencion === "buscar_propiedades") {
@@ -76,50 +63,41 @@ Mensaje del usuario: "${user_message}"
       if (result.filtros.modalidad) {
         query += ` AND modalidad = '${result.filtros.modalidad}'`;
       }
+
       if (result.filtros.distrito) {
         query += ` AND distrito LIKE '%${result.filtros.distrito}%'`;
       }
+
       if (result.filtros.bedrooms) {
         query += ` AND bedrooms >= ${result.filtros.bedrooms}`;
       }
+
       if (result.filtros.precio_max) {
         query += ` AND price <= ${result.filtros.precio_max}`;
       }
 
-      console.log("📌 Ejecutando SQL:", query);
-
-      try {
-        const [rows] = await pool.query(query);
-        propiedades = rows;
-        console.log("📌 Resultados SQL:", propiedades);
-      } catch (sqlError) {
-        console.log("❌ Error SQL:", sqlError);
-        return res.status(500).json({
-          error: "Error ejecutando SQL",
-          details: sqlError.message
-        });
-      }
+      const [rows] = await pool.query(query);
+      propiedades = rows;
     }
 
-    // Respuesta final
+    // 5️⃣ Construir respuesta final
     let respuesta = result.respuesta || "Perfecto, cuéntame qué tipo de propiedad buscas.";
 
     if (propiedades.length > 0) {
       respuesta += `\n\nEncontré ${propiedades.length} opciones:\n\n`;
-      propiedades.slice(0, 3).forEach(p => {
+
+      propiedades.slice(0, 3).forEach((p) => {
         respuesta += `🏡 ${p.title}\n💵 S/${p.price}\n📍 ${p.location}\n🔗 https://tuweb.com/detalle/${p.id}\n\n`;
       });
     }
 
-    console.log("📌 Respuesta final:", respuesta);
-
     return res.status(200).json({ respuesta });
 
   } catch (error) {
-    console.log("❌ ERROR GENERAL:", error);
+    console.error("Error general:", error);
     return res.status(500).json({
       error: "Error general procesando solicitud",
-      details: error.message || error
+      details: error.message
     });
   }
 }
