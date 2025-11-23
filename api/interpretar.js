@@ -1,4 +1,3 @@
-// /ap/interpretar.js
 import Groq from "groq-sdk";
 import { pool } from "../db.js";
 
@@ -33,6 +32,9 @@ Formato EXACTO:
   "respuesta": ""
 }
 
+Responde SOLO con JSON puro.
+No agregues explicaciones fuera del JSON.
+
 Mensaje del usuario: "${user_message}"
   `;
 
@@ -46,10 +48,28 @@ Mensaje del usuario: "${user_message}"
       ]
     });
 
-    // Parsear JSON
-    const result = JSON.parse(completion.choices[0].message.content);
+    // 2️⃣ Extraer respuesta cruda de la IA
+    const raw = completion.choices[0].message.content;
 
-    // 2️⃣ Si la intención es buscar propiedades → SQL dinámico
+    // 🔍 DEBUG: mostrar la respuesta original de la IA
+    console.log("=== RAW IA RESPONSE ===");
+    console.log(raw);
+    console.log("=======================");
+
+    // Intentar parsear JSON de forma segura
+    let result;
+
+    try {
+      result = JSON.parse(raw);
+    } catch (e) {
+      return res.status(500).json({
+        error: "JSON inválido recibido de la IA",
+        raw_ia: raw,
+        details: e.message
+      });
+    }
+
+    // 3️⃣ SQL si la intención es buscar propiedades
     let propiedades = [];
 
     if (result.intencion === "buscar_propiedades") {
@@ -75,7 +95,7 @@ Mensaje del usuario: "${user_message}"
       propiedades = rows;
     }
 
-    // 3️⃣ Construir respuesta final
+    // 4️⃣ Construir respuesta final
     let respuesta = result.respuesta || "Perfecto, cuéntame qué tipo de propiedad buscas.";
 
     if (propiedades.length > 0) {
@@ -89,8 +109,10 @@ Mensaje del usuario: "${user_message}"
     return res.status(200).json({ respuesta });
 
   } catch (error) {
-    console.error("Error IA:", error);
-    return res.status(500).json({ error: "Error interpretando mensaje", details: error.message });
+    console.error("Error IA general:", error);
+    return res.status(500).json({
+      error: "Error interpretando mensaje",
+      details: error.message
+    });
   }
 }
-
