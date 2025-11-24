@@ -34,15 +34,28 @@ export default async function handlerBot(req, res) {
 
     console.log("📥 Mensaje recibido:", text);
 
-    // Interpretar intención
-    let respuesta = "";
-    try {
-      respuesta = await interpretarMensaje(text);
-    } catch (err) {
-      console.error("⚠ Error interpretando mensaje:", err);
-      respuesta = "Hubo un inconveniente interpretando tu mensaje. ¿Podrías repetirlo?";
-    }
+// Interpretar intención
+let interpretacion;
+let respuesta;
 
+try {
+  interpretacion = await interpretarMensaje(text);
+
+  // Si interpretarMensaje devuelve un objeto, extraemos el texto
+  if (typeof interpretacion === "string") {
+    respuesta = interpretacion;
+  } else if (typeof interpretacion === "object" && interpretacion?.respuesta) {
+    respuesta = interpretacion.respuesta;
+  } else {
+    respuesta = "Gracias por tu mensaje. ¿En qué puedo ayudarte?";
+  }
+
+} catch (err) {
+  console.error("⚠ Error interpretando mensaje:", err);
+  respuesta = "Hubo un inconveniente interpretando tu mensaje. ¿Podrías repetirlo?";
+}
+
+    console.log("📤 Respuesta que se enviará al usuario:", respuesta);
     // Enviar respuesta
     try {
       await enviarMensaje(from, respuesta);
