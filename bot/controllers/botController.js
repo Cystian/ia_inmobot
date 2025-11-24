@@ -1,36 +1,59 @@
 // /bot/controllers/botController.js
 
-import interpretarMensaje from "../interpretar/index.js"; 
+import interpretarMensaje from "../interpretar/index.js";
 import enviarMensaje from "../services/sendMessage.js";
 
 export default async function handlerBot(req, res) {
   try {
     const body = req.body;
 
-    // Validar que sea evento de WhatsApp
-    if (
-      body.object === "whatsapp_business_account" &&
-      body.entry?.[0]?.changes?.[0]?.value?.messages
-    ) {
-      const messages = body.entry[0].changes[0].value.messages;
-      const message = messages[0];
-      const from = message.from; // número del usuario
-      const text = message.text?.body || "";
+    // Log para depuración
+    console.log("🔍 Body recibido:", JSON.stringify(body, null, 2));
 
-      console.log("📥 Mensaje recibido:", text);
-
-      // Interpretar intención
-      const respuesta = await interpretarMensaje(text);
-
-      // Enviar respuesta
-      await enviarMensaje(from, respuesta);
-
+    // Validar que sea un evento real de WhatsApp
+    if (body.object !== "whatsapp_business_account") {
+      console.log("⚠ No es un evento de WhatsApp válido.");
       return res.sendStatus(200);
     }
 
+    // Proteger todas las lecturas del JSON
+    const entry = body.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+
+    const message = value?.messages?.[0];
+
+    // Si no hay mensaje, pero sí es un evento WA, no romper
+    if (!message) {
+      console.log("⚠ Evento recibido sin mensajes. (Status u otros)");
+      return res.sendStatus(200);
+    }
+
+    const from = message.from;
+    const text = message.text?.body || "";
+
+    console.log("📥 Mensaje recibido:", text);
+
+    // Interpretar intención
+    let respuesta = "";
+    try {
+      respuesta = await interpretarMensaje(text);
+    } catch (err) {
+      console.error("⚠ Error interpretando mensaje:", err);
+      respuesta = "Hubo un inconveniente interpretando tu mensaje. ¿Podrías repetirlo?";
+    }
+
+    // Enviar respuesta
+    try {
+      await enviarMensaje(from, respuesta);
+    } catch (err) {
+      console.error("⚠ Error enviando mensaje:", err);
+    }
+
     return res.sendStatus(200);
+
   } catch (error) {
-    console.error("❌ Error manejando mensaje:", error);
+    console.error("❌ Error general en handlerBot:", error);
     return res.sendStatus(500);
   }
 }
