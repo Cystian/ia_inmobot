@@ -1,6 +1,6 @@
 // /bot/services/sendMessage.js
 
-const WHATSAPP_TOKEN = process.env.META_WHATSAPP_TOKEN;
+const WHATSAPP_TOKEN = process.env.META_ACCESS_TOKEN;
 const PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
 
 export default async function enviarMensaje(to, texto) {
