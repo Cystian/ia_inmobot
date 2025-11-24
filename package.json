@@ -2,6 +2,9 @@
   "name": "ia_inmobot",
   "version": "1.0.1",
   "type": "module",
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
     "mysql2": "latest",
     "openai": "latest",
@@ -10,4 +13,3 @@
     "cors": "latest"
   }
 }
-
