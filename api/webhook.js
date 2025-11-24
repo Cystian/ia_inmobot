@@ -13,6 +13,10 @@ export const config = {
 
 import handlerBot from "../bot/controllers/botController.js";
 
+console.log("📁 DIRNAME:", __dirname);
+console.log("📁 FILENAMES:", __filename);
+
+
 export default async function handler(req, res) {
   try {
     const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN;
