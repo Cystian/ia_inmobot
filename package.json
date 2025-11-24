@@ -2,15 +2,10 @@
   "name": "ia_inmobot",
   "version": "1.0.1",
   "type": "module",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
   "dependencies": {
-    "express": "latest",
     "mysql2": "latest",
     "openai": "latest",
-"groq-sdk": "latest",
+    "groq-sdk": "latest",
     "dotenv": "latest",
     "cors": "latest"
   }
