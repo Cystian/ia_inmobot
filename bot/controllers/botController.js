@@ -5,28 +5,38 @@ import enviarMensaje from "../services/sendMessage.js";
 
 export default async function handlerBot(req, res) {
   try {
-    const body = req.body;
+    // ==============================================
+    // 1️⃣ Convertir body string → JSON seguro
+    // ==============================================
+    let body = req.body;
 
-    // Log para depuración
-    console.log("🔍 Body recibido:", JSON.stringify(body, null, 2));
-
-    // Validar que sea un evento real de WhatsApp
-    if (body.object !== "whatsapp_business_account") {
-      console.log("⚠ No es un evento de WhatsApp válido.");
-      return res.sendStatus(200);
+    try {
+      if (typeof body === "string") {
+        body = JSON.parse(body);
+      }
+    } catch (parseErr) {
+      console.log("⚠ Body no es JSON válido:", req.body);
+      return res.status(200).send("OK");
     }
 
-    // Proteger todas las lecturas del JSON
-    const entry = body.entry?.[0];
+    console.log("🔍 Body recibido:", JSON.stringify(body, null, 2));
+
+    // ==============================================
+    // 2️⃣ Validar que sea WhatsApp
+    // ==============================================
+    if (body.object !== "whatsapp_business_account") {
+      console.log("⚠ No es un evento de WhatsApp válido.");
+      return res.status(200).send("OK");
+    }
+
+    const entry = body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
-
     const message = value?.messages?.[0];
 
-    // Si no hay mensaje, pero sí es un evento WA, no romper
     if (!message) {
-      console.log("⚠ Evento recibido sin mensajes. (Status u otros)");
-      return res.sendStatus(200);
+      console.log("⚠ Evento sin mensajes (status u otros)");
+      return res.status(200).send("OK");
     }
 
     const from = message.from;
@@ -34,39 +44,43 @@ export default async function handlerBot(req, res) {
 
     console.log("📥 Mensaje recibido:", text);
 
-// Interpretar intención
-let interpretacion;
-let respuesta;
+    // ==============================================
+    // 3️⃣ Interpretación segura
+    // ==============================================
+    let interpretacion;
+    let respuesta;
 
-try {
-  interpretacion = await interpretarMensaje(text);
+    try {
+      interpretacion = await interpretarMensaje(text);
 
-  // Si interpretarMensaje devuelve un objeto, extraemos el texto
-  if (typeof interpretacion === "string") {
-    respuesta = interpretacion;
-  } else if (typeof interpretacion === "object" && interpretacion?.respuesta) {
-    respuesta = interpretacion.respuesta;
-  } else {
-    respuesta = "Gracias por tu mensaje. ¿En qué puedo ayudarte?";
-  }
+      if (typeof interpretacion === "string") {
+        respuesta = interpretacion;
+      } else if (typeof interpretacion === "object" && interpretacion?.respuesta) {
+        respuesta = interpretacion.respuesta;
+      } else {
+        respuesta = "¿En qué puedo ayudarte?";
+      }
 
-} catch (err) {
-  console.error("⚠ Error interpretando mensaje:", err);
-  respuesta = "Hubo un inconveniente interpretando tu mensaje. ¿Podrías repetirlo?";
-}
+    } catch (err) {
+      console.error("⚠ Error interpretando mensaje:", err);
+      respuesta = "Hubo un problema interpretando tu mensaje. ¿Podrías repetirlo?";
+    }
 
     console.log("📤 Respuesta que se enviará al usuario:", respuesta);
-    // Enviar respuesta
+
+    // ==============================================
+    // 4️⃣ Enviar mensaje a WhatsApp
+    // ==============================================
     try {
       await enviarMensaje(from, respuesta);
     } catch (err) {
       console.error("⚠ Error enviando mensaje:", err);
     }
 
-    return res.sendStatus(200);
+    return res.status(200).send("OK");
 
   } catch (error) {
     console.error("❌ Error general en handlerBot:", error);
-    return res.sendStatus(500);
+    return res.status(200).send("OK");
   }
 }
