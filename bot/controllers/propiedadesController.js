@@ -1,12 +1,7 @@
 // /bot/controllers/propiedadesController.js
 // -------------------------------------------------------
-// Controlador principal para búsquedas inmobiliarias.
-// IA Premium v3 + Mensajería Premium:
-// - Follow-up avanzado
-// - Precio dinámico
-// - Paginación profesional
-// - Microtextos humanizados
-// - Control de spam
+// Controlador principal de búsqueda inmobiliaria.
+// Fase 3: IA Premium + Ranking Inteligente + Follow-up avanzado
 // -------------------------------------------------------
 
 import {
@@ -14,18 +9,18 @@ import {
   buscarSugeridas
 } from "../services/propiedadesService.js";
 
-import { FRONTEND_BASE_URL } from "../config/env.js";
-import { MENSAJES } from "../utils/messages.js";
-import { logInfo } from "../utils/log.js";
-
-import { updateSession } from "../interpretar/contextManager.js";
-
-// 🔥 IMPORTAR CAPA PREMIUM
 import {
   sendTextPremium,
   sendImagePremium,
   cierrePremium
 } from "../services/sendMessageManager.js";
+
+import { rankProperties } from "../interpretar/propertyRanker.js";
+import { updateSession } from "../interpretar/contextManager.js";
+
+import { FRONTEND_BASE_URL } from "../config/env.js";
+import { MENSAJES } from "../utils/messages.js";
+import { logInfo } from "../utils/log.js";
 
 const ITEMS_PER_PAGE = 6;
 
@@ -33,66 +28,65 @@ const propiedadesController = {
   async buscar(filtros = {}, contexto = {}) {
     const { iaRespuesta, userPhone, session, rawMessage, esFollowUp } = contexto;
 
-    logInfo("BUSCAR PROPIEDADES v3 + Premium", {
+    logInfo("BUSCAR PROPIEDADES v4", {
       filtros,
       rawMessage,
       esFollowUp
     });
 
     // ==============================================================
-    // 1️⃣ Si es búsqueda nueva → reiniciar paginación  
+    // 1️⃣ Reset de página en búsquedas frescas  
     // ==============================================================
     let page = esFollowUp ? session.lastPage || 1 : 1;
 
     // ==============================================================
-    // 2️⃣ Ejecutar búsqueda  
+    // 2️⃣ Obtener propiedades + aplicar ranking inteligente  
     // ==============================================================
-    let propiedades = await buscarPropiedades(filtros);
+    let propertiesDB = await buscarPropiedades(filtros);
 
-    // ==============================================================
-    // 3️⃣ Sin resultados → sugeridas  
-    // ==============================================================
-    if (propiedades.length === 0) {
+    // Si no se encuentra nada → sugeridas
+    if (propertiesDB.length === 0) {
       await sendTextPremium(userPhone, MENSAJES.intro_propiedades_sugeridas, session);
-
-      propiedades = await buscarSugeridas();
+      propertiesDB = await buscarSugeridas();
       updateSession(userPhone, {
         lastIntent: "buscar_propiedades",
         lastFilters: filtros,
-        lastProperties: propiedades,
+        lastProperties: propertiesDB,
         lastPage: 1
       });
     }
 
+    // Aplicar ranking inteligente (antes de paginar)
+    const propiedadesRankeadas = rankProperties(propertiesDB, filtros);
+
     // ==============================================================
-    // 4️⃣ Follow-Up: "más opciones"  
+    // 3️⃣ Follow-up de “más opciones”  
     // ==============================================================
     const msgLower = rawMessage.toLowerCase();
 
-    if (
-      msgLower.includes("más opciones") ||
-      msgLower.includes("mas opciones") ||
-      msgLower.includes("muestrame mas") ||
-      msgLower.includes("muéstrame más") ||
-      msgLower.includes("otra opcion") ||
-      msgLower.includes("otra opción")
-    ) {
+    const followUpTriggers = [
+      "más opciones", "mas opciones",
+      "muestrame mas", "muéstrame más",
+      "otra opcion", "otra opción"
+    ];
+
+    if (followUpTriggers.some(t => msgLower.includes(t))) {
       page = (session.lastPage || 1) + 1;
     }
 
     // ==============================================================
-    // 5️⃣ Paginación  
+    // 4️⃣ Paginación después del ranking  
     // ==============================================================
     const start = (page - 1) * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
 
-    const propiedadesPagina = propiedades.slice(start, end);
+    const propiedadesPagina = propiedadesRankeadas.slice(start, end);
 
     if (propiedadesPagina.length === 0) {
       await sendTextPremium(
         userPhone,
-        "Ya no tengo más opciones dentro de este segmento 😊. " +
-          "Si deseas, puedo buscar alternativas en zonas cercanas o ajustar el presupuesto.",
+        "No tengo más opciones dentro de este segmento 😊. " +
+          "Si deseas, puedo ampliar zonas o ajustar el presupuesto.",
         session
       );
 
@@ -101,7 +95,7 @@ const propiedadesController = {
     }
 
     // ==============================================================
-    // 6️⃣ Introducción humanizada  
+    // 5️⃣ Mensaje introductorio inteligente  
     // ==============================================================
     if (!esFollowUp || msgLower.includes("buscar") || msgLower.includes("quiero")) {
       await sendTextPremium(
@@ -109,20 +103,16 @@ const propiedadesController = {
         iaRespuesta || MENSAJES.intro_propiedades_default,
         session
       );
-    } else if (
-      msgLower.includes("más") ||
-      msgLower.includes("mas") ||
-      msgLower.includes("otra")
-    ) {
+    } else if (followUpTriggers.some(t => msgLower.includes(t))) {
       await sendTextPremium(
         userPhone,
-        "Perfecto 👌 Te muestro más opciones alineadas con lo que estás buscando:",
+        "Perfecto 👌 Te muestro más opciones alineadas con lo que buscas:",
         session
       );
     }
 
     // ==============================================================
-    // 7️⃣ Enviar imagen + caption (Premium)  
+    // 6️⃣ Enviar cada propiedad (imagen + caption premium)  
     // ==============================================================
     for (let p of propiedadesPagina) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
@@ -132,7 +122,9 @@ const propiedadesController = {
 💵 *US$ ${p.price}*
 📍 ${p.location || "Ubicación por confirmar"}
 
-🛏 ${p.bedrooms || 0} dorm | 🚿 ${p.bathrooms || 0} baños | 🚗 ${p.cocheras || 0} coch
+🛏 ${p.bedrooms || 0} dorm  
+🚿 ${p.bathrooms || 0} baños  
+🚗 ${p.cocheras || 0} coch
 
 🔗 ${url}
       `.trim();
@@ -141,29 +133,27 @@ const propiedadesController = {
     }
 
     // ==============================================================
-    // 8️⃣ Cierre Premium  
+    // 7️⃣ Cierre Premium  
     // ==============================================================
-    if (propiedadesPagina.length < ITEMS_PER_PAGE) {
-      await sendTextPremium(
-        userPhone,
-        cierrePremium(),
-        session
-      );
+    const hasMore = propiedadesRankeadas.length > end;
+
+    if (!hasMore) {
+      await sendTextPremium(userPhone, cierrePremium(), session);
     } else {
       await sendTextPremium(
         userPhone,
-        "¿Quieres ver *más opciones* o prefieres refinar la búsqueda (zona, precio, cuartos, extras)?",
+        "¿Quieres ver *más opciones* o prefieres afinar la búsqueda (zona, precio, cuartos, extras)?",
         session
       );
     }
 
     // ==============================================================
-    // 9️⃣ Actualizar sesión  
+    // 8️⃣ Actualizar sesión  
     // ==============================================================
     updateSession(userPhone, {
       lastIntent: "buscar_propiedades",
       lastFilters: filtros,
-      lastProperties: propiedades,
+      lastProperties: propiedadesRankeadas,
       lastPage: page
     });
 
