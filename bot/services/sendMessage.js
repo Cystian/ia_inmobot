@@ -24,7 +24,7 @@ export default async function enviarMensaje(to, texto) {
     });
 
     const data = await response.json();
-    console.log("📤 Respuesta de Meta:", data);
+    console.log("📤 Respuesta de Meta (texto):", data);
 
     return data;
   } catch (error) {
@@ -33,7 +33,7 @@ export default async function enviarMensaje(to, texto) {
   }
 }
 
-export async function enviarImagen(to, imageUrl, caption = "") {
+export async function enviarImagen(to, imagenUrl, caption = "") {
   try {
     const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
 
@@ -42,7 +42,7 @@ export async function enviarImagen(to, imageUrl, caption = "") {
       to,
       type: "image",
       image: {
-        link: imageUrl,
+        link: imagenUrl,
         caption: caption
       }
     };
@@ -57,7 +57,7 @@ export async function enviarImagen(to, imageUrl, caption = "") {
     });
 
     const data = await response.json();
-    console.log("📤 Imagen enviada:", data);
+    console.log("📤 Respuesta de Meta (imagen):", data);
 
     return data;
   } catch (error) {
@@ -65,4 +65,3 @@ export async function enviarImagen(to, imageUrl, caption = "") {
     return null;
   }
 }
-
