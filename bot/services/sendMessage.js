@@ -32,3 +32,37 @@ export default async function enviarMensaje(to, texto) {
     return null;
   }
 }
+
+export async function enviarImagen(to, imageUrl, caption = "") {
+  try {
+    const url = `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`;
+
+    const payload = {
+      messaging_product: "whatsapp",
+      to,
+      type: "image",
+      image: {
+        link: imageUrl,
+        caption: caption
+      }
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await response.json();
+    console.log("📤 Imagen enviada:", data);
+
+    return data;
+  } catch (error) {
+    console.error("❌ Error enviando imagen:", error);
+    return null;
+  }
+}
+
