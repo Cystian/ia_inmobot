@@ -51,7 +51,11 @@ export default async function handlerBot(req, res) {
     let respuesta;
 
     try {
-      interpretacion = await interpretarMensaje(text);
+      // ⛔ ERROR ANTES: no enviabas "from"
+      // interpretacion = await interpretarMensaje(text);
+
+      // ✅ AHORA SÍ le pasamos el número del usuario
+      interpretacion = await interpretarMensaje(text, from);
 
       if (typeof interpretacion === "string") {
         respuesta = interpretacion;
