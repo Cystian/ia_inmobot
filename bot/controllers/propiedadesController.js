@@ -12,9 +12,11 @@ import { MENSAJES } from "../utils/messages.js";
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { logInfo } from "../utils/log.js";
 
+import enviarMensaje, { enviarImagen } from "../services/sendMessage.js";
+
 const propiedadesController = {
   async buscar(filtros = {}, contexto = {}) {
-    const { iaRespuesta } = contexto;
+    const { iaRespuesta, userPhone } = contexto;
 
     logInfo("Buscar propiedades", { filtros });
 
@@ -33,18 +35,34 @@ const propiedadesController = {
       intro = MENSAJES.intro_propiedades_sugeridas;
     }
 
+    // =========================================
+    // 🖼️ Enviar imagen principal de refuerzo
+    // SOLO si existe al menos 1 propiedad
+    // =========================================
+    if (propiedades.length > 0 && propiedades[0].image) {
+      try {
+        await enviarImagen(
+          userPhone,
+          propiedades[0].image,
+          `🏡 *${propiedades[0].title}*\n💵 US$ ${propiedades[0].price}\n📍 ${propiedades[0].location}`
+        );
+      } catch (err) {
+        console.error("⚠ Error enviando imagen principal:", err);
+      }
+    }
+
+    // =========================================
+    // 📄 Modelo ACTUAL de respuesta (sin cambios)
+    // =========================================
     let respuesta = intro;
 
-    // Construir listado
     propiedades.slice(0, 6).forEach((p) => {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
 
       respuesta += `\n\n🏡 *${p.title}*`;
       respuesta += `\n💵 US$ ${p.price}`;
       respuesta += `\n📍 ${p.location || "Zona por confirmar"}`;
-      respuesta += `\n🛏 ${p.bedrooms || 0} dorm | 🚿 ${
-        p.bathrooms || 0
-      } baños | 🚗 ${p.cocheras || 0} coch`;
+      respuesta += `\n🛏 ${p.bedrooms || 0} dorm | 🚿 ${p.bathrooms || 0} baños | 🚗 ${p.cocheras || 0} coch`;
       respuesta += `\n🔗 ${url}`;
     });
 
@@ -55,4 +73,5 @@ const propiedadesController = {
 };
 
 export default propiedadesController;
+
 
