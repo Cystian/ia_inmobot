@@ -1,7 +1,7 @@
 // /bot/interpretar/intentClassifier.js
 // -------------------------------------------------------
 // Llama a Groq para obtener intención + filtros base
-// También detecta saludos simples sin intención inmobiliaria.
+// Maneja saludos, intención mezclada y follow-ups.
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -13,7 +13,7 @@ const client = new Groq({
   apiKey: GROQ_API_KEY
 });
 
-// Saludos sin intención comercial
+// Saludos sin intención comercial (solo palabra exacta)
 const SALUDOS_PUROS = [
   "hola",
   "buenas",
@@ -31,43 +31,98 @@ const PALABRAS_INTENCION = [
   "casa",
   "departamento",
   "depa",
+  "dpto",
   "terreno",
+  "local",
+  "oficina",
   "comprar",
   "alquilar",
   "alquiler",
   "venta",
+  "vender",
   "rentar",
-  "hab",
-  "cuarto",
-  "habitacion",
-  "dorm"
+  "renta",
+  "alquilo",
+  "vendo",
+  "busco",
+  "quiero",
+  "propiedad",
+  "inmueble"
+];
+
+// Frases típicas de seguimiento / refinamiento
+const FRASES_FOLLOW_UP = [
+  "mas barato",
+  "más barato",
+  "mas economico",
+  "más economico",
+  "mas economico",
+  "mas opciones",
+  "más opciones",
+  "otra opcion",
+  "otra opción",
+  "muestrame mas",
+  "muéstrame mas",
+  "muéstrame más",
+  "tienes otra",
+  "algo mas",
+  "algo más",
+  "solo en",
+  "solo en ",
+  "con cochera",
+  "con cocheras",
+  "con patio",
+  "con jardin",
+  "con jardín",
+  "con balcon",
+  "con balcón",
+  "con piscina"
 ];
 
 // -------------------------------------------------------
 
-export async function getIaAnalysis(raw, msg) {
-  const esSaludoSimple = SALUDOS_PUROS.some(
-    (s) => msg === s || msg.startsWith(s)
-  );
+export async function getIaAnalysis(raw, msg, session = {}) {
+  const msgTrim = msg.trim();
 
   const contieneIntencion = PALABRAS_INTENCION.some((p) =>
-    msg.includes(p)
+    msgTrim.includes(p)
   );
 
-  // Caso saludo puro
+  // Saludo puro solo si el mensaje es exactamente el saludo
+  const esSaludoSimple = SALUDOS_PUROS.includes(msgTrim);
+
+  // Caso saludo puro sin intención inmobiliaria
   if (esSaludoSimple && !contieneIntencion) {
     return {
       intencion: "saludo_simple",
       filtrosBase: {},
       iaRespuesta: MENSAJES.saludo_inicial,
-      esSaludoSimple: true
+      esSaludoSimple: true,
+      esFollowUp: false
     };
   }
 
-  // IA Groq
+  // Detectar follow-up: usuario ya buscó algo antes y ahora afina
+  const tieneSesionPrevia = !!session.lastIntent && !!session.lastFilters;
+  const esFollowUp = FRASES_FOLLOW_UP.some((f) => msgTrim.includes(f));
+
+  if (tieneSesionPrevia && esFollowUp) {
+    // Reutilizamos la intención anterior (normalmente buscar_propiedades)
+    return {
+      intencion: session.lastIntent || "buscar_propiedades",
+      filtrosBase: session.lastFilters || {},
+      iaRespuesta: "",
+      esSaludoSimple: false,
+      esFollowUp: true
+    };
+  }
+
+  // IA Groq: intención principal + filtros base
   const prompt = `
 Eres un asesor inmobiliario peruano MUY profesional.
-Devuelve SOLO JSON sin backticks, sin markdown, sin código:
+Devuelve SOLO JSON válido, sin backticks, sin markdown, sin explicaciones.
+
+Formato EXACTO:
 
 {
   "intencion": "buscar_propiedades|saludo|despedida|otro",
@@ -76,29 +131,40 @@ Devuelve SOLO JSON sin backticks, sin markdown, sin código:
     "status": "",
     "tipo": "",
     "bedrooms": null,
+    "bathrooms": null,
+    "cocheras": null,
+    "area_min": null,
+    "precio_min": null,
     "precio_max": null,
     "extras": []
   },
   "respuesta": ""
 }
 
-Mensaje: "${raw}"
+- "tipo": casa|departamento|terreno|local|oficina
+- "status": venta|alquiler
+- "distritos": ej. ["Chimbote", "Nuevo Chimbote", "Buenos Aires"]
+- "extras": ej. ["frente_parque", "esquina", "negociable", "estreno", "papeles_ok", "remodelado", "amoblado"]
+
+Mensaje del usuario: "${raw}"
 `;
 
   try {
     const completion = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
-        { role: "system", content: "Eres un asesor inmobiliario muy humano y profesional. Devuelve SOLO JSON válido, sin ``` ni markdown." },
+        {
+          role: "system",
+          content:
+            "Eres un asesor inmobiliario muy humano y profesional. Devuelve SOLO JSON válido, sin ``` ni markdown."
+        },
         { role: "user", content: prompt }
       ]
     });
 
     let content = completion.choices[0].message.content || "";
 
-    // ---------------------------------------------------
-    // 🧹 Limpieza automática: elimina ``` y ```json
-    // ---------------------------------------------------
+    // Limpieza de posibles ```json y ``` que rompen el parseo
     content = content
       .replace(/```json/gi, "")
       .replace(/```/g, "")
@@ -114,7 +180,8 @@ Mensaje: "${raw}"
         intencion: "buscar_propiedades",
         filtrosBase: {},
         iaRespuesta: "",
-        esSaludoSimple: false
+        esSaludoSimple: false,
+        esFollowUp: false
       };
     }
 
@@ -122,9 +189,9 @@ Mensaje: "${raw}"
       intencion: ia.intencion || "buscar_propiedades",
       filtrosBase: ia.filtros || {},
       iaRespuesta: ia.respuesta || "",
-      esSaludoSimple: false
+      esSaludoSimple: false,
+      esFollowUp: false
     };
-
   } catch (error) {
     logError("IA Groq", error);
 
@@ -132,7 +199,8 @@ Mensaje: "${raw}"
       intencion: "buscar_propiedades",
       filtrosBase: {},
       iaRespuesta: "",
-      esSaludoSimple: false
+      esSaludoSimple: false,
+      esFollowUp: false
     };
   }
 }
