@@ -1,7 +1,8 @@
 // /bot/interpretar/intentClassifier.js
 // -------------------------------------------------------
 // Llama a Groq para obtener intención + filtros base
-// Maneja saludos, intención mezclada y follow-ups.
+// Maneja saludos, follow-ups y ahora preguntas sobre
+// una propiedad previamente mostrada.
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -79,6 +80,23 @@ const FRASES_FOLLOW_UP = [
   "con piscina"
 ];
 
+// Palabras/frases que indican que se refiere a "esa" propiedad
+const PROPERTY_REF_WORDS = [
+  "esa",
+  "esa propiedad",
+  "esa casa",
+  "ese depa",
+  "ese departamento",
+  "ese terreno",
+  "ese lote",
+  "la primera",
+  "la 1",
+  "la segunda",
+  "la 2",
+  "la tercera",
+  "la 3"
+];
+
 // -------------------------------------------------------
 
 export async function getIaAnalysis(raw, msg, session = {}) {
@@ -88,7 +106,7 @@ export async function getIaAnalysis(raw, msg, session = {}) {
     msgTrim.includes(p)
   );
 
-  // Saludo puro solo si el mensaje es exactamente el saludo
+  // Saludo puro solo si el mensaje es EXACTAMENTE el saludo
   const esSaludoSimple = SALUDOS_PUROS.includes(msgTrim);
 
   // Caso saludo puro sin intención inmobiliaria
@@ -102,12 +120,28 @@ export async function getIaAnalysis(raw, msg, session = {}) {
     };
   }
 
-  // Detectar follow-up: usuario ya buscó algo antes y ahora afina
-  const tieneSesionPrevia = !!session.lastIntent && !!session.lastFilters;
-  const esFollowUp = FRASES_FOLLOW_UP.some((f) => msgTrim.includes(f));
+  const tieneSesionPrevia =
+    !!session.lastIntent && Array.isArray(session.lastProperties) && session.lastProperties.length > 0;
 
+  // 🧠 1) Pregunta sobre UNA propiedad ya mostrada (PROPERTY MEMORY)
+  const refiereAPropiedad = PROPERTY_REF_WORDS.some((w) =>
+    msgTrim.includes(w)
+  );
+
+  if (tieneSesionPrevia && refiereAPropiedad) {
+    // No llamamos a Groq, lo manejamos por reglas
+    return {
+      intencion: "pregunta_propiedad",
+      filtrosBase: {},
+      iaRespuesta: "",
+      esSaludoSimple: false,
+      esFollowUp: false
+    };
+  }
+
+  // 🧠 2) Follow-up general (más barato, más opciones, etc.)
+  const esFollowUp = FRASES_FOLLOW_UP.some((f) => msgTrim.includes(f));
   if (tieneSesionPrevia && esFollowUp) {
-    // Reutilizamos la intención anterior (normalmente buscar_propiedades)
     return {
       intencion: session.lastIntent || "buscar_propiedades",
       filtrosBase: session.lastFilters || {},
@@ -117,7 +151,7 @@ export async function getIaAnalysis(raw, msg, session = {}) {
     };
   }
 
-  // IA Groq: intención principal + filtros base
+  // 🧠 3) IA Groq: intención principal + filtros base
   const prompt = `
 Eres un asesor inmobiliario peruano MUY profesional.
 Devuelve SOLO JSON válido, sin backticks, sin markdown, sin explicaciones.
