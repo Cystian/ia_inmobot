@@ -43,7 +43,7 @@ const propiedadesController = {
     // 🥇 VERSIÓN PREMIUM:
     // Imagen + caption por cada propiedad
     // =========================================
-    const maxMostrar = 6;
+    const maxMostrar = 10;
 
     for (let p of propiedades.slice(0, maxMostrar)) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
