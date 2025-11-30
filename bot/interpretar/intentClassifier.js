@@ -67,7 +67,7 @@ export async function getIaAnalysis(raw, msg) {
   // IA Groq
   const prompt = `
 Eres un asesor inmobiliario peruano MUY profesional.
-Devuelve SOLO JSON:
+Devuelve SOLO JSON sin backticks, sin markdown, sin código:
 
 {
   "intencion": "buscar_propiedades|saludo|despedida|otro",
@@ -89,12 +89,34 @@ Mensaje: "${raw}"
     const completion = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
-        { role: "system", content: "Eres un asesor inmobiliario muy humano y profesional. Responde SOLO JSON." },
+        { role: "system", content: "Eres un asesor inmobiliario muy humano y profesional. Devuelve SOLO JSON válido, sin ``` ni markdown." },
         { role: "user", content: prompt }
       ]
     });
 
-    const ia = JSON.parse(completion.choices[0].message.content);
+    let content = completion.choices[0].message.content || "";
+
+    // ---------------------------------------------------
+    // 🧹 Limpieza automática: elimina ``` y ```json
+    // ---------------------------------------------------
+    content = content
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    let ia = {};
+
+    try {
+      ia = JSON.parse(content);
+    } catch (err) {
+      console.error("⚠ No se pudo parsear el JSON de Groq:", content);
+      return {
+        intencion: "buscar_propiedades",
+        filtrosBase: {},
+        iaRespuesta: "",
+        esSaludoSimple: false
+      };
+    }
 
     return {
       intencion: ia.intencion || "buscar_propiedades",
@@ -102,6 +124,7 @@ Mensaje: "${raw}"
       iaRespuesta: ia.respuesta || "",
       esSaludoSimple: false
     };
+
   } catch (error) {
     logError("IA Groq", error);
 
@@ -113,4 +136,3 @@ Mensaje: "${raw}"
     };
   }
 }
-
