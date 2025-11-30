@@ -1,7 +1,12 @@
 // /bot/controllers/propiedadesController.js
 // -------------------------------------------------------
 // Controlador principal de búsqueda inmobiliaria.
-// Fase 3: IA Premium + Ranking Inteligente + Follow-up avanzado
+// FASE 5 completada:
+// - Ranking Inteligente (F3)
+// - Semántica avanzada (F4)
+// - Perfil del usuario (F5 M1)
+// - Preguntas activas (F5 M2)
+// - Premium Messaging
 // -------------------------------------------------------
 
 import {
@@ -15,8 +20,10 @@ import {
   cierrePremium
 } from "../services/sendMessageManager.js";
 
-import { rankProperties } from "../interpretar/propertyRanker.js";
 import { updateSession } from "../interpretar/contextManager.js";
+import { updateUserProfile } from "../interpretar/userProfile.js";
+import { detectMissingInfo } from "../interpretar/activeQuestions.js";
+import { rankProperties } from "../interpretar/propertyRanker.js";
 
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
@@ -28,93 +35,125 @@ const propiedadesController = {
   async buscar(filtros = {}, contexto = {}) {
     const { iaRespuesta, userPhone, session, rawMessage, esFollowUp } = contexto;
 
-    logInfo("BUSCAR PROPIEDADES v4", {
+    logInfo("BUSCAR PROPIEDADES v5", {
       filtros,
       rawMessage,
-      esFollowUp
+      esFollowUp,
+      sessionUserProfile: session.userProfile
     });
 
     // ==============================================================
-    // 1️⃣ Reset de página en búsquedas frescas  
+    // 1️⃣ Actualizar el perfil del usuario
+    // ==============================================================
+    const newProfile = updateUserProfile(
+      session,
+      filtros.semantic || {},
+      filtros
+    );
+
+    updateSession(userPhone, {
+      userProfile: newProfile
+    });
+
+    // ==============================================================
+    // 2️⃣ ¿Falta información? → Pregunta activa
+    // ==============================================================
+    const pregunta = detectMissingInfo(filtros, session);
+
+    if (pregunta) {
+      await sendTextPremium(userPhone, pregunta, session);
+      updateSession(userPhone, { lastIntent: "pregunta_pendiente" });
+      return null;
+    }
+
+    // ==============================================================
+    // 3️⃣ Control de paginación
     // ==============================================================
     let page = esFollowUp ? session.lastPage || 1 : 1;
 
     // ==============================================================
-    // 2️⃣ Obtener propiedades + aplicar ranking inteligente  
+    // 4️⃣ Ejecutar búsqueda en BD
     // ==============================================================
-    let propertiesDB = await buscarPropiedades(filtros);
+    let propsDB = await buscarPropiedades(filtros);
 
-    // Si no se encuentra nada → sugeridas
-    if (propertiesDB.length === 0) {
+    if (propsDB.length === 0) {
       await sendTextPremium(userPhone, MENSAJES.intro_propiedades_sugeridas, session);
-      propertiesDB = await buscarSugeridas();
+      propsDB = await buscarSugeridas();
+
       updateSession(userPhone, {
         lastIntent: "buscar_propiedades",
         lastFilters: filtros,
-        lastProperties: propertiesDB,
-        lastPage: 1
+        lastProperties: propsDB,
+        lastPage: 1,
+        userProfile: newProfile
       });
     }
 
-    // Aplicar ranking inteligente (antes de paginar)
-    const propiedadesRankeadas = rankProperties(propertiesDB, filtros);
+    // ==============================================================
+    // 5️⃣ Aplicar ranking inteligente + semántica + perfil usuario
+    // ==============================================================
+    const propiedadesRankeadas = rankProperties(propsDB, {
+      ...filtros,
+      semantic: filtros.semantic,
+      userProfile: newProfile
+    });
 
     // ==============================================================
-    // 3️⃣ Follow-up de “más opciones”  
+    // 6️⃣ Follow-up: "más opciones"
     // ==============================================================
     const msgLower = rawMessage.toLowerCase();
-
-    const followUpTriggers = [
-      "más opciones", "mas opciones",
-      "muestrame mas", "muéstrame más",
-      "otra opcion", "otra opción"
+    const followTriggers = [
+      "más opciones",
+      "mas opciones",
+      "muestrame mas",
+      "muéstrame más",
+      "otra opcion",
+      "otra opción",
+      "siguiente"
     ];
 
-    if (followUpTriggers.some(t => msgLower.includes(t))) {
+    if (followTriggers.some((t) => msgLower.includes(t))) {
       page = (session.lastPage || 1) + 1;
     }
 
     // ==============================================================
-    // 4️⃣ Paginación después del ranking  
+    // 7️⃣ Paginación
     // ==============================================================
     const start = (page - 1) * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
+    const propsPagina = propiedadesRankeadas.slice(start, end);
 
-    const propiedadesPagina = propiedadesRankeadas.slice(start, end);
-
-    if (propiedadesPagina.length === 0) {
+    if (propsPagina.length === 0) {
       await sendTextPremium(
         userPhone,
-        "No tengo más opciones dentro de este segmento 😊. " +
-          "Si deseas, puedo ampliar zonas o ajustar el presupuesto.",
+        "Ya no tengo más opciones en este segmento 😊.\nPuedo buscar alternativas ajustando zona o presupuesto si gustas.",
         session
       );
-
       updateSession(userPhone, { lastPage: page });
       return null;
     }
 
     // ==============================================================
-    // 5️⃣ Mensaje introductorio inteligente  
+    // 8️⃣ Intro Premium (solo al inicio)
     // ==============================================================
-    if (!esFollowUp || msgLower.includes("buscar") || msgLower.includes("quiero")) {
+    if (!esFollowUp) {
       await sendTextPremium(
         userPhone,
         iaRespuesta || MENSAJES.intro_propiedades_default,
         session
       );
-    } else if (followUpTriggers.some(t => msgLower.includes(t))) {
+    } else if (followTriggers.some((t) => msgLower.includes(t))) {
       await sendTextPremium(
         userPhone,
-        "Perfecto 👌 Te muestro más opciones alineadas con lo que buscas:",
+        "Perfecto 👌 Aquí tienes más opciones alineadas con tus preferencias:",
         session
       );
     }
 
     // ==============================================================
-    // 6️⃣ Enviar cada propiedad (imagen + caption premium)  
+    // 9️⃣ Enviar propiedades (imagen + caption)
     // ==============================================================
-    for (let p of propiedadesPagina) {
+    for (const p of propsPagina) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
 
       const caption = `
@@ -132,29 +171,34 @@ const propiedadesController = {
       await sendImagePremium(userPhone, p.image, caption, session);
     }
 
-    // ==============================================================
-    // 7️⃣ Cierre Premium  
-    // ==============================================================
     const hasMore = propiedadesRankeadas.length > end;
 
-    if (!hasMore) {
-      await sendTextPremium(userPhone, cierrePremium(), session);
+    // ==============================================================
+    // 🔟 Cierre Premium
+    // ==============================================================
+    if (hasMore) {
+      await sendTextPremium(
+        userPhone,
+        "¿Quieres ver *más opciones* o deseas afinar la búsqueda (zona, presupuesto, cuartos, estilo)?",
+        session
+      );
     } else {
       await sendTextPremium(
         userPhone,
-        "¿Quieres ver *más opciones* o prefieres afinar la búsqueda (zona, precio, cuartos, extras)?",
+        cierrePremium(),
         session
       );
     }
 
     // ==============================================================
-    // 8️⃣ Actualizar sesión  
+    // 1️⃣1️⃣ Guardar estado de sesión
     // ==============================================================
     updateSession(userPhone, {
       lastIntent: "buscar_propiedades",
       lastFilters: filtros,
       lastProperties: propiedadesRankeadas,
-      lastPage: page
+      lastPage: page,
+      userProfile: newProfile
     });
 
     return null;
