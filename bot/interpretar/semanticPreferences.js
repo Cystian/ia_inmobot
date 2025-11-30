@@ -1,4 +1,3 @@
-
 // /bot/interpretar/semanticPreferences.js
 // -------------------------------------------------------
 // Extrae preferencias "semánticas" a partir del lenguaje
