@@ -6,6 +6,7 @@
 import propiedadesController from "../controllers/propiedadesController.js";
 import saludoController from "../controllers/saludoController.js";
 import ayudaController from "../controllers/ayudaController.js";
+import detallePropiedadController from "../controllers/detallePropiedadController.js";
 import { MENSAJES } from "../utils/messages.js";
 
 export async function routeIntent(intencion, filtros, contexto = {}) {
@@ -20,8 +21,10 @@ export async function routeIntent(intencion, filtros, contexto = {}) {
     case "despedida":
       return MENSAJES.despedida;
 
+    case "pregunta_propiedad":
+      return await detallePropiedadController.responder(contexto);
+
     default:
       return ayudaController.generica(contexto);
   }
 }
-
