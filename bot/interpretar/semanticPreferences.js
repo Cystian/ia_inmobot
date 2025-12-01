@@ -1,6 +1,6 @@
 // /bot/interpretar/semanticPreferences.js
 // -------------------------------------------------------
-// Extrae preferencias "semánticas" a partir del lenguaje
+// Extrae preferencias "semánticas" a partir del lenguaje.
 // natural del usuario (estilo, uso, vibe).
 // No toca BD, solo genera pistas para el ranker.
 // -------------------------------------------------------
