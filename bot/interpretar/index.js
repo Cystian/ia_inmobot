@@ -72,14 +72,14 @@ export default async function interpretar(userMessage = "", userPhone = "") {
   // 6️⃣ Actualizar memoria conversacional
   updateSession(userPhone, {
     lastMessage: raw,
-    lastIntent: intencion,
+    lastIntent: intencionFinal,
     lastFilters: filtrosFinales,
     semanticPrefs,
     esFollowUp
-  });
+});
 
   // 7️⃣ Enrutar hacia controlador final
-  const respuesta = await routeIntent(intencion, filtrosFinales, {
+  const respuesta = await routeIntent(intencionFinal, filtrosFinales, {
     iaRespuesta,
     rawMessage: raw,
     userPhone,
