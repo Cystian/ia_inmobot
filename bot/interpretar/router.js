@@ -53,6 +53,9 @@ export async function routeIntent(intencion, filtros, contexto = {}) {
     case "pregunta_propiedad":
       return detallePropiedadController.responder(contexto);
 
+      case "inversion":
+  return inversionController.recomendar(filtros, contexto);
+
     default:
       // ==============================================
       // 3️⃣ Manejo universal de intenciones ambiguas
