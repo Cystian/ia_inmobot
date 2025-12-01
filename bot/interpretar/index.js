@@ -2,7 +2,7 @@
 // -------------------------------------------------------
 // Orquesta todas las etapas v5:
 // 1. Normaliza el texto
-// 2. IA detecta intención base
+// 2. IA detecta intención basee
 // 3. Se enriquecen filtros con reglas
 // 4. Se extraen preferencias semánticas + follow-ups
 // 5. Router envía al controlador correctoox
