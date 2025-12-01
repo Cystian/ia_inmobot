@@ -32,21 +32,30 @@ export default async function interpretar(userMessage = "", userPhone = "") {
   } = await getIaAnalysis(raw, msgNormalizado, session);
 
   /////
-  const KW_INVERSION = [
-  "invertir",
-  "revalorice",
-  "revalorización",
-  "para negocio",
-  "para proyecto",
-  "local comercial",
-  "terreno para negocio",
-  "retorno",
-  "rentable"
-];
+  // Detectar inversión ANTES de usar la intención de IA
+  const msgLower = raw.toLowerCase();
 
-if (KW_INVERSION.some(k => low.includes(k))) {
-  return "inversion";
-}
+  const KW_INVERSION = [
+    "invertir",
+    "inversión",
+    "revalorice",
+    "revalorización",
+    "para negocio",
+    "para proyecto",
+    "local comercial",
+    "terreno para negocio",
+    "retorno",
+    "rentable",
+    "crezca rápido",
+    "ganancia"
+  ];
+
+  let intencionFinal = intencion;
+
+  // Si detectamos inversión → forzamos el intent
+  if (KW_INVERSION.some(k => msgLower.includes(k))) {
+    intencionFinal = "inversion";
+  }
 //////
   
   // 3️⃣ Si es saludo simple → se devuelve directamente
