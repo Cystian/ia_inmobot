@@ -3,7 +3,7 @@
 // Extrae preferencias "semánticas" a partir del lenguaje.
 // natural del usuario (estilo, uso, vibe).
 // No toca BD, solo genera pistas para el ranker..
-// -------------------------------------------------------
+// ------------------------------------------------------
 
 export function extractSemanticPreferences(raw = "") {
   const lower = raw.toLowerCase();
