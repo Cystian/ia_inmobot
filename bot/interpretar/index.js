@@ -14,7 +14,7 @@ import { enrichFiltersWithRules } from "./entityExtractor.js";
 import { routeIntent } from "./router.js";
 import { getSession, updateSession } from "./contextManager.js";
 import { extractSemanticPreferences } from "./semanticPreferences.js";
-import { detectFollowUp } from "./entityExtractorFollowUps.js";
+import { detectFollowUp } from "./entityExtractorFollowUp.js";
 
 export default async function interpretar(userMessage = "", userPhone = "") {
   const raw = userMessage;
