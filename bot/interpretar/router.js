@@ -1,26 +1,26 @@
 // /bot/interpretar/router.js
 // -------------------------------------------------------
-// Router oficial fase 5. Sin loops, sin repeticiones,
-// follow-up inteligente, y compatibilidad total con v5.
+// Router oficial fase 5–6. Sin loops, sin repeticiones,
+// follow-up inteligente y compatibilidad completa.
 // -------------------------------------------------------
 
 import propiedadesController from "../controllers/propiedadesController.js";
 import saludoController from "../controllers/saludoController.js";
 import ayudaController from "../controllers/ayudaController.js";
 import detallePropiedadController from "../controllers/detallePropiedadController.js";
+import inversionController from "../controllers/inversionController.js"; // ✅ IMPORT NECESARIO
 import { MENSAJES } from "../utils/messages.js";
 
 export async function routeIntent(intencion, filtros, contexto = {}) {
   const { esFollowUp, session = {} } = contexto;
 
   // ==============================================
-  // 1️⃣ FOLLOW-UP → Ajusta, NO reemplaza intención
+  // 1️⃣ FOLLOW-UP → Mantiene intención coherente
   // ==============================================
   if (esFollowUp) {
-    // Mantener intención previa SOLO si tiene sentido
     const intentPrevio = session.lastIntent || "buscar_propiedades";
 
-    // FOLLOW-UP SOBRE LISTA DE PROPIEDADES
+    // Follow-up sobre lista de propiedades
     if (intentPrevio === "buscar_propiedades") {
       return propiedadesController.buscar(filtros, {
         ...contexto,
@@ -28,16 +28,22 @@ export async function routeIntent(intencion, filtros, contexto = {}) {
       });
     }
 
-    // FOLLOW-UP SOBRE DETALLE DE PROPIEDAD
+    // Follow-up sobre detalle de propiedad
     if (intentPrevio === "pregunta_propiedad") {
       return detallePropiedadController.responder(contexto);
     }
 
-    // Si no se reconoce → manejar como intención nueva
+    // Follow-up sobre inversión
+    if (intentPrevio === "inversion") {
+      return inversionController.recomendar(filtros, {
+        ...contexto,
+        esFollowUp: true
+      });
+    }
   }
 
   // ==============================================
-  // 2️⃣ Intenciones principales
+  // 2️⃣ INTENCIONES PRINCIPALES
   // ==============================================
   switch (intencion) {
     case "buscar_propiedades":
@@ -53,12 +59,12 @@ export async function routeIntent(intencion, filtros, contexto = {}) {
     case "pregunta_propiedad":
       return detallePropiedadController.responder(contexto);
 
-      case "inversion":
-  return inversionController.recomendar(filtros, contexto);
+    case "inversion":
+      return inversionController.recomendar(filtros, contexto); // ✔ AHORA FUNCIONA
 
     default:
       // ==============================================
-      // 3️⃣ Manejo universal de intenciones ambiguas
+      // 3️⃣ INTENCIÓN AMBIGUA → Ayuda genérica
       // ==============================================
       return ayudaController.generica(contexto);
   }
