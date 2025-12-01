@@ -14,51 +14,53 @@ import { enrichFiltersWithRules } from "./entityExtractor.js";
 import { routeIntent } from "./router.js";
 import { getSession, updateSession } from "./contextManager.js";
 import { extractSemanticPreferences } from "./semanticPreferences.js";
-import { detectFollowUp } from "./entityExtractorFollowUp.js";
 
 export default async function interpretar(userMessage = "", userPhone = "") {
   const raw = userMessage;
   const msgNormalizado = normalizeText(raw);
 
-  // 1️⃣ IA: intención + filtros base
-  const { intencion, filtrosBase, iaRespuesta, esSaludoSimple } =
-    await getIaAnalysis(raw, msgNormalizado);
+  // 1️⃣ IA: intención + filtros base + follow-up detectado internamente
+  const {
+    intencion,
+    filtrosBase,
+    iaRespuesta,
+    esSaludoSimple,
+    esFollowUp
+  } = await getIaAnalysis(raw, msgNormalizado, getSession(userPhone));
 
-  // Saludo puro → no tocamos BD ni nada más
+  // 🌱 Si es saludo simple → no se continúa pipeline
   if (esSaludoSimple) {
     return iaRespuesta;
   }
 
-  // 2️⃣ Enriquecer filtros con reglas (distritos, status, tipo, precio, cuartos, cocheras…)
+  // 2️⃣ Enriquecer filtros con reglas (distritos, status, tipo, cuartos, cocheras…)
   const filtrosFinales = enrichFiltersWithRules(msgNormalizado, filtrosBase);
 
-  // 3️⃣ Cargar sesión previa del usuario (si existe)
+  // 3️⃣ Cargar sesión previa del usuario
   const session = getSession(userPhone);
 
-  // 4️⃣ Preferencias semánticas (moderno, clásico, premium, económico, céntrico, tranquilo…)
+  // 4️⃣ Preferencias semánticas (moderno, premium, céntrico, familiar…)
   const semanticPrefs = extractSemanticPreferences(msgNormalizado, session);
 
-  // 5️⃣ Follow-up (más opciones, otra zona, ajustar precio, etc.)
-  const followUp = detectFollowUp(msgNormalizado, session);
-
-  // 6️⃣ Actualizar sesión con lo último que sabemos
+  // 5️⃣ Actualizar memoria conversacional
   updateSession(userPhone, {
     lastMessage: raw,
     lastIntent: intencion,
     lastFilters: filtrosFinales,
     semanticPrefs,
-    followUpFlags: followUp
+    esFollowUp
   });
 
-  // 7️⃣ Enrutar intención hacia su controlador
+  // 6️⃣ Enviar al controlador correcto
   const respuesta = await routeIntent(intencion, filtrosFinales, {
     iaRespuesta,
     rawMessage: raw,
     userPhone,
     session,
     semanticPrefs,
-    followUp
+    esFollowUp
   });
 
   return respuesta || "¿En qué puedo ayudarte?";
 }
+
