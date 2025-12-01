@@ -13,7 +13,7 @@ import { getIaAnalysis } from "./intentClassifier.js";
 import { enrichFiltersWithRules } from "./entityExtractor.js";
 import { routeIntent } from "./router.js";
 import { getSession, updateSession } from "./contextManager.js";
-import { extractSemanticPreferences } from "./semanticPreferences.js";
+import { extractSemanticPreferences } from "./semanticPreferences1.js";
 import { detectFollowUp } from "./entityExtractorFollowUps.js";
 
 export default async function interpretar(userMessage = "", userPhone = "") {
