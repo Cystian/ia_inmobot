@@ -5,7 +5,7 @@
 // 2. IA detecta intención base
 // 3. Se enriquecen filtros con reglas
 // 4. Se añaden preferencias semánticas
-// 5. Router envía al controlador correcto
+// 5. Router envía al controlador correctoo
 // -------------------------------------------------------
 
 import { normalizeText } from "./normalize.js";
