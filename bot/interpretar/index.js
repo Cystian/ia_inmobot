@@ -31,6 +31,24 @@ export default async function interpretar(userMessage = "", userPhone = "") {
     esFollowUp
   } = await getIaAnalysis(raw, msgNormalizado, session);
 
+  /////
+  const KW_INVERSION = [
+  "invertir",
+  "revalorice",
+  "revalorización",
+  "para negocio",
+  "para proyecto",
+  "local comercial",
+  "terreno para negocio",
+  "retorno",
+  "rentable"
+];
+
+if (KW_INVERSION.some(k => low.includes(k))) {
+  return "inversion";
+}
+//////
+  
   // 3️⃣ Si es saludo simple → se devuelve directamente
   if (esSaludoSimple) {
     return iaRespuesta;
