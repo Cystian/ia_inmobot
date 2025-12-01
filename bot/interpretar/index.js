@@ -1,59 +1,52 @@
 // /bot/interpretar/index.js
 // -------------------------------------------------------
-// Orquesta todas las etapas:
+// Pipeline principal de interpretación IA v3
 // 1. Normaliza el texto
-// 2. IA detecta intención base
-// 3. Se enriquecen filtros con reglas
-// 4. Se añaden preferencias semánticas
-// 5. Router envía al controlador correctoo
+// 2. Extrae intención base
+// 3. Extrae entidades (cuartos, baños, zonas, precio, cocheras…)
+// 4. Extrae preferencias semánticas
+// 5. Router envía al controlador correcto
 // -------------------------------------------------------
 
-import { normalizeText } from "./normalize.js";
-import { getIaAnalysis } from "./intentClassifier.js";
-import { enrichFiltersWithRules } from "./entityExtractor.js";
-import { extractSemanticPreferences } from "./semanticPreferences.js";
-import { routeIntent } from "./router.js";
+import normalizeText from "./normalizeText.js";
+import getIaAnalysis from "./intentClassifier.js";
+import extractEntitiesWithRules from "./entityExtractor.js";
+import extractFollowup from "./entityExtractorFollowups.js";
+import extractSemanticPreferences from "./semanticPreferences.js";
+import routerIA from "./router.js";
 
-export default async function interpretar(
-  userMessage = "",
-  userPhone = "",
-  session = {}
-) {
-  const raw = userMessage;
-  const msgNormalizado = normalizeText(raw);
+export default async function interpretar(raw) {
+  try {
+    // 1️⃣ Normalización del lenguaje
+    const clean = normalizeText(raw);
 
-  // 1️⃣ IA + detección de saludo / follow-up / property memory
-  const {
-    intencion,
-    filtrosBase,
-    iaRespuesta,
-    esSaludoSimple,
-    esFollowUp
-  } = await getIaAnalysis(raw, msgNormalizado, session);
+    // 2️⃣ IA: clasificación de intención general
+    const ia = await getIaAnalysis(clean);
 
-  // Si es un saludo simple → no tocar BD
-  if (esSaludoSimple) {
-    return iaRespuesta;
+    // 3️⃣ Extraer entidades numéricas y de filtros (precio, zona, cuartos…)
+    const entidades = extractEntitiesWithRules(clean);
+
+    // 4️⃣ Extraer follow-ups (más opciones, otra zona, etc.)
+    const follow = extractFollowup(clean);
+
+    // 5️⃣ Extraer preferencias semánticas (moderno, clásico, premium, céntrico…)
+    const prefs = extractSemanticPreferences(clean);
+
+    // 6️⃣ Armar paquete final para router
+    const paquete = {
+      raw,
+      clean,
+      ia,
+      entidades,
+      follow,
+      prefs,
+    };
+
+    // 7️⃣ Router decide qué controlador debe manejar la solicitud
+    return await routerIA(paquete);
+
+  } catch (err) {
+    console.error("❌ Error interpretando:", err);
+    return "Hubo un problema interpretando tu mensaje. ¿Podrías repetirlo?";
   }
-
-  // 2️⃣ Enriquecer filtros con reglas adicionales (Chimbote / Nvo. Chimbote, etc.)
-  let filtrosFinales = enrichFiltersWithRules(msgNormalizado, filtrosBase);
-
-  // 3️⃣ Añadir preferencias semánticas (fase 4)
-  const semanticPrefs = extractSemanticPreferences(raw);
-  filtrosFinales = {
-    ...filtrosFinales,
-    semantic: semanticPrefs
-  };
-
-  // 4️⃣ Enrutar intención hacia su controlador
-  const respuesta = await routeIntent(intencion, filtrosFinales, {
-    iaRespuesta,
-    rawMessage: raw,
-    userPhone,
-    session,
-    esFollowUp
-  });
-
-  return respuesta;
 }
