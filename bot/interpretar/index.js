@@ -16,33 +16,33 @@ import { getSession, updateSession } from "./contextManager.js";
 import { extractSemanticPreferences } from "./semanticPreferences.js";
 
 export default async function interpretar(userMessage = "", userPhone = "") {
-  const raw = userMessage;
+  const raw = userMessage || "";
   const msgNormalizado = normalizeText(raw);
 
-  // 1️⃣ IA: intención + filtros base + follow-up detectado internamente
+  // 1️⃣ Obtener sesión previa ANTES de IA
+  const session = getSession(userPhone);
+
+  // 2️⃣ IA: intención + filtros + follow-up
   const {
     intencion,
     filtrosBase,
     iaRespuesta,
     esSaludoSimple,
     esFollowUp
-  } = await getIaAnalysis(raw, msgNormalizado, getSession(userPhone));
+  } = await getIaAnalysis(raw, msgNormalizado, session);
 
-  // 🌱 Si es saludo simple → no se continúa pipeline
+  // 3️⃣ Si es saludo simple → se devuelve directamente
   if (esSaludoSimple) {
     return iaRespuesta;
   }
 
-  // 2️⃣ Enriquecer filtros con reglas (distritos, status, tipo, cuartos, cocheras…)
+  // 4️⃣ Reglas adicionales (cocheras, baños, distritos, etc.)
   const filtrosFinales = enrichFiltersWithRules(msgNormalizado, filtrosBase);
 
-  // 3️⃣ Cargar sesión previa del usuario
-  const session = getSession(userPhone);
-
-  // 4️⃣ Preferencias semánticas (moderno, premium, céntrico, familiar…)
+  // 5️⃣ Preferencias semánticas (premium, moderno, tranquilo, etc.)
   const semanticPrefs = extractSemanticPreferences(msgNormalizado, session);
 
-  // 5️⃣ Actualizar memoria conversacional
+  // 6️⃣ Actualizar memoria conversacional
   updateSession(userPhone, {
     lastMessage: raw,
     lastIntent: intencion,
@@ -51,7 +51,7 @@ export default async function interpretar(userMessage = "", userPhone = "") {
     esFollowUp
   });
 
-  // 6️⃣ Enviar al controlador correcto
+  // 7️⃣ Enrutar hacia controlador final
   const respuesta = await routeIntent(intencion, filtrosFinales, {
     iaRespuesta,
     rawMessage: raw,
@@ -60,6 +60,9 @@ export default async function interpretar(userMessage = "", userPhone = "") {
     semanticPrefs,
     esFollowUp
   });
+
+  // 8️⃣ Si el controlador devolvió null (solo envió imágenes/texto), no respondemos texto adicional
+  if (respuesta === null) return null;
 
   return respuesta || "¿En qué puedo ayudarte?";
 }
