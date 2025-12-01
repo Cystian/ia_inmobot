@@ -4,6 +4,11 @@
 // Compatible con index.js + router.js v5.1
 // -------------------------------------------------------
 
+// /bot/controllers/propiedadesController.js
+// -------------------------------------------------------
+// Controlador principal FASE 5 (estable)
+// -------------------------------------------------------
+
 import {
   buscarPropiedades,
   buscarSugeridas
@@ -14,6 +19,9 @@ import { updateSession } from "../interpretar/contextManager.js";
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
 import { logInfo } from "../utils/log.js";
+
+// Import preparado para Fase 6 (cierre premium)
+import { cierrePremium } from "../services/sendMessageManager.js";
 
 const ITEMS_PER_PAGE = 6;
 
@@ -27,17 +35,10 @@ const propiedadesController = {
       esFollowUp
     });
 
-    // ==========================================================
-    // 1️⃣ Paginación (si no es follow-up → reset)
-    // ==========================================================
     let page = esFollowUp ? (session.lastPage || 1) : 1;
 
-    // ==========================================================
-    // 2️⃣ Ejecutar búsqueda inicial
-    // ==========================================================
     let propiedades = await buscarPropiedades(filtros);
 
-    // Sin resultados → sugeridas
     if (propiedades.length === 0) {
       await enviarMensaje(userPhone, MENSAJES.intro_propiedades_sugeridas);
 
@@ -51,9 +52,6 @@ const propiedadesController = {
       });
     }
 
-    // ==========================================================
-    // 3️⃣ Follow-up explícito: "más opciones"
-    // ==========================================================
     const msgLower = rawMessage.toLowerCase();
     const followTriggers = [
       "más opciones",
@@ -69,9 +67,6 @@ const propiedadesController = {
       page = (session.lastPage || 1) + 1;
     }
 
-    // ==========================================================
-    // 4️⃣ Paginación real
-    // ==========================================================
     const start = (page - 1) * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
     const propsPagina = propiedades.slice(start, end);
@@ -87,18 +82,12 @@ const propiedadesController = {
       return null;
     }
 
-    // ==========================================================
-    // 5️⃣ Introducción solo para búsquedas nuevas
-    // ==========================================================
     if (!esFollowUp) {
       await enviarMensaje(userPhone, iaRespuesta || MENSAJES.intro_propiedades_default);
     } else if (followTriggers.some(t => msgLower.includes(t))) {
       await enviarMensaje(userPhone, "Perfecto 👌 Aquí tienes más opciones:");
     }
 
-    // ==========================================================
-    // 6️⃣ Enviar propiedades (imagen + caption)
-    // ==========================================================
     for (const p of propsPagina) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
 
@@ -117,9 +106,6 @@ const propiedadesController = {
       await enviarImagen(userPhone, p.image, caption);
     }
 
-    // ==========================================================
-    // 7️⃣ Cierre dinámico
-    // ==========================================================
     const hasMore = propiedades.length > end;
 
     if (hasMore) {
@@ -135,9 +121,6 @@ const propiedadesController = {
       );
     }
 
-    // ==========================================================
-    // 8️⃣ Guardar estado final
-    // ==========================================================
     updateSession(userPhone, {
       lastIntent: "buscar_propiedades",
       lastFilters: filtros,
