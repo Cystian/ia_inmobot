@@ -8,6 +8,7 @@
 // - preguntas sobre una propiedad ya mostrada (Property Memory)
 // -------------------------------------------------------
 
+
 import Groq from "groq-sdk";
 import { GROQ_API_KEY } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
@@ -230,4 +231,49 @@ Mensaje del usuario: "${raw}"
     try {
       ia = JSON.parse(content);
     } catch (err) {
-      console.error("⚠ No se
+      console.error("⚠ No se pudo parsear el JSON de Groq:", content);
+      ia = {};
+    }
+
+    const filtrosBase = ia.filtros || {};
+
+    let intencion = ia.intencion || (contieneIntencion ? "buscar_propiedades" : "otro");
+    let iaRespuesta = ia.respuesta || "";
+
+    // Ajustes de intención a nuestro dominio interno
+    if (intencion === "saludo") {
+      iaRespuesta = iaRespuesta || MENSAJES.saludo_inicial;
+    }
+
+    if (intencion === "despedida") {
+      iaRespuesta = iaRespuesta || MENSAJES.despedida;
+    }
+
+    return {
+      intencion,
+      filtrosBase,
+      iaRespuesta,
+      esSaludoSimple: false,
+      esFollowUp: false
+    };
+  } catch (error) {
+    logError("Error en getIaAnalysis (Groq)", error);
+
+    // Fallback robusto si la IA falla
+    const fallbackIntencion = contieneIntencion
+      ? "buscar_propiedades"
+      : "otro";
+
+    const fallbackRespuesta = contieneIntencion
+      ? MENSAJES.intro_propiedades_default
+      : MENSAJES.error_general;
+
+    return {
+      intencion: fallbackIntencion,
+      filtrosBase: {},
+      iaRespuesta: fallbackRespuesta,
+      esSaludoSimple: false,
+      esFollowUp: false
+    };
+  }
+}
