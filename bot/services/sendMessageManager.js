@@ -1,17 +1,19 @@
 // /bot/services/sendMessageManager.js
 // -------------------------------------------------------
-// Capa Premium de Mensajería.
-// - Variación natural en respuestas
-// - Microcierres
-// - Control de spam (evita repetición)
-// - Prefijos naturales
-// - Tono profesional inmobiliario
+// Capa Premium de Mensajería (VERSIÓN FASE 5 COMPLETA)
+// - Variación natural y controlada
+// - Antispam inteligente (texto + imagen)
+// - Prefijos suaves en contexto correcto
+// - Fallback seguro si Meta falla
+// - Preparado para Fase 6 (CRM + Reply Buttons)
 // -------------------------------------------------------
 
 import enviarMensaje, { enviarImagen } from "./sendMessage.js";
 import { updateSession } from "../interpretar/contextManager.js";
 
-// Variaciones para mensajes introductorios
+// -------------------------------------------------------
+// Variaciones Premium
+// -------------------------------------------------------
 const SOFT_PREFIXES = [
   "Perfecto 👍",
   "Claro que sí 😊",
@@ -23,77 +25,80 @@ const SOFT_PREFIXES = [
   "Excelente elección 👇"
 ];
 
-// Variaciones para cierres suaves
 const CIERRES = [
   "Si deseas, puedo ajustarlo a tu presupuesto.",
   "Puedo buscar algo más específico si quieres.",
   "¿Quieres ver alternativas similares?",
-  "Puedo ayudarte con visitas o asesor humano.",
+  "Puedo ayudarte coordinando visitas.",
   "Dime si deseas refinar zonas o presupuesto.",
-  "Cuando quieras seguimos viendo opciones 😊.",
-  "¿Quieres que te muestre más alternativas?"
+  "Cuando quieras seguimos buscando 😊.",
+  "¿Quieres que te muestre más opciones?"
 ];
 
 // -------------------------------------------------------
-// Obtiene un item aleatorio de un array
+// Helpers
 // -------------------------------------------------------
-function randomPick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
+function randomPick(array) {
+  return array[Math.floor(Math.random() * array.length)];
+}
+
+function normalize(str = "") {
+  return str.toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+// Evita spam considerando similitud aproximada
+function isSimilar(a = "", b = "") {
+  return normalize(a) === normalize(b);
 }
 
 // -------------------------------------------------------
-// Evita enviar mensajes duplicados seguidos
-// -------------------------------------------------------
-function shouldSend(prevMsg, newMsg) {
-  if (!prevMsg) return true;
-  return prevMsg.trim() !== newMsg.trim();
-}
-
-// -------------------------------------------------------
-// ENVÍO DE TEXTO PREMIUM
+// ENVÍO PREMIUM DE TEXTO
 // -------------------------------------------------------
 export async function sendTextPremium(userPhone, text, session) {
   if (!userPhone) return;
 
-  // Añadir prefijo natural aleatorio en ciertos casos
-  let formatted = text;
+  let finalText = text.trim();
 
-  const msgLower = text.toLowerCase();
-  const isListIntro =
-    msgLower.includes("te muestro") ||
-    msgLower.includes("aquí tienes") ||
-    msgLower.includes("opciones") ||
-    msgLower.includes("propiedad") ||
-    msgLower.includes("encaja muy bien");
+  const low = finalText.toLowerCase();
 
-  if (isListIntro) {
-    formatted = `${randomPick(SOFT_PREFIXES)}\n\n${text}`;
+  const triggersIntro = [
+    "propiedad",
+    "opciones",
+    "te muestro",
+    "aquí tienes",
+    "encaja muy bien",
+    "mira esta opción"
+  ];
+
+  const debePrefix =
+    triggersIntro.some((t) => low.includes(t)) &&
+    !low.startsWith("perfecto") &&
+    !low.startsWith("genial");
+
+  if (debePrefix) {
+    finalText = `${randomPick(SOFT_PREFIXES)}\n\n${finalText}`;
   }
 
-  // Control de spam por repetición
-  if (!shouldSend(session.lastBotMessage, formatted)) {
-    console.log("⛔ Bloqueo de spam: mensaje repetido.");
+  // Antispam inteligente
+  if (isSimilar(session?.lastBotMessage, finalText)) {
+    console.log("⛔ Evitado spam de texto similar.");
     return;
   }
 
-  await enviarMensaje(userPhone, formatted);
+  await enviarMensaje(userPhone, finalText);
 
-  updateSession(userPhone, {
-    lastBotMessage: formatted
-  });
+  updateSession(userPhone, { lastBotMessage: finalText });
 }
 
 // -------------------------------------------------------
-// ENVÍO DE IMÁGENES PREMIUM
-// Añade caption humanizado y control de spam
+// ENVÍO PREMIUM DE IMÁGENES
 // -------------------------------------------------------
 export async function sendImagePremium(userPhone, imageUrl, caption, session) {
-  if (!userPhone) return;
+  if (!userPhone || !imageUrl) return;
 
-  // Control básico de repetición de imagen similar
-  const prevCaption = session.lastBotImageCaption || "";
-  if (!shouldSend(prevCaption, caption)) {
-    console.log("⛔ Bloqueo de spam imagen.");
+  // Antispam imagen
+  if (isSimilar(session?.lastBotImageCaption, caption)) {
+    console.log("⛔ Imagen ignorada por repetición.");
     return;
   }
 
@@ -101,18 +106,29 @@ export async function sendImagePremium(userPhone, imageUrl, caption, session) {
     await enviarImagen(userPhone, imageUrl, caption);
 
     updateSession(userPhone, {
-      lastBotImageCaption: caption
+      lastBotImageCaption: caption,
+      lastBotImageURL: imageUrl
     });
-  } catch (err) {
-    console.error("⚠ Error enviando imagen premium:", err);
-
-    // Fallback a mensaje de texto
+  } catch (e) {
+    console.error("⚠ Error enviando imagen. Fallback a texto:", e);
     await enviarMensaje(userPhone, caption);
   }
 }
 
 // -------------------------------------------------------
-// Generar cierre profesional aleatorio
+// Cierre Premium (aleatorio)
+// -------------------------------------------------------
+export function cierrePremium() {
+  return randomPick(CIERRES);
+}
+
+// -------------------------------------------------------
+// Para Fase 6–7 CRM: envío de listas / botones
+// -------------------------------------------------------
+export async function sendListPremium(userPhone, title, buttons) {
+  // Se implementará en Fase 6
+}
+
 // -------------------------------------------------------
 export function cierrePremium() {
   return randomPick(CIERRES);
