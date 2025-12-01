@@ -1,7 +1,8 @@
 // /bot/interpretar/userProfile.js
 // --------------------------------------------------------
-// Maneja el perfil del usuario: preferencias aprendidas.
-// No afecta BD. Se guarda en memoria de sesión.
+// Perfil inteligente del usuario (Fase 5)
+// Aprende de filtros, semántica y follow-ups.
+// Optimizado para influir en el ranker y personalización.
 // --------------------------------------------------------
 
 export function createEmptyProfile() {
@@ -11,37 +12,74 @@ export function createEmptyProfile() {
     zonaPreferida: null,
     cocherasMin: null,
     dormitoriosMin: null,
+    areaMin: null,
     estilo: null,
     vibe: null,
-    uso: null
+    uso: null,
+    historialDistritos: [],
+    historialTipos: [],
+    interacciones: 0
   };
 }
 
-// Fusiona el perfil previo con nuevo conocimiento
 export function updateUserProfile(session = {}, semantic = {}, filtros = {}) {
   const profile = session.userProfile || createEmptyProfile();
 
-  // Tipo preferido
-  if (filtros.tipo) profile.tipoPreferido = filtros.tipo;
+  // Track de interacciones
+  profile.interacciones += 1;
 
-  // Zona preferida
-  if (filtros.distritos?.length > 0) {
-    profile.zonaPreferida = filtros.distritos[0];
+  // ======================================================
+  // 1️⃣ Tipo de inmueble
+  // ======================================================
+  if (filtros.tipo) {
+    profile.tipoPreferido = filtros.tipo;
+    profile.historialTipos.push(filtros.tipo);
   }
 
-  // Presupuesto
-  if (filtros.precio_max) profile.presupuesto = filtros.precio_max;
+  // ======================================================
+  // 2️⃣ Zona
+  // ======================================================
+  if (filtros.distritos?.length > 0) {
+    const zona = filtros.distritos[0];
+    profile.zonaPreferida = zona;
+    profile.historialDistritos.push(zona);
+  }
 
-  // Cocheras
-  if (filtros.cocheras) profile.cocherasMin = filtros.cocheras;
+  // ======================================================
+  // 3️⃣ Presupuesto
+  // ======================================================
+  if (filtros.precio_max) {
+    profile.presupuesto = filtros.precio_max;
+  }
 
-  // Dormitorios
-  if (filtros.bedrooms) profile.dormitoriosMin = filtros.bedrooms;
+  // ======================================================
+  // 4️⃣ Cocheras / Dormitorios
+  // ======================================================
+  if (filtros.cocheras) {
+    profile.cocherasMin = filtros.cocheras;
+  }
 
-  // Preferencias semánticas
+  if (filtros.bedrooms) {
+    profile.dormitoriosMin = filtros.bedrooms;
+  }
+
+  // Área mínima (si el usuario pidió algo “más grande” antes)
+  if (filtros.area_min) {
+    profile.areaMin = filtros.area_min;
+  }
+
+  // ======================================================
+  // 5️⃣ Semántica avanzada
+  // ======================================================
   if (semantic.estilo) profile.estilo = semantic.estilo;
   if (semantic.vibe) profile.vibe = semantic.vibe;
   if (semantic.uso) profile.uso = semantic.uso;
+
+  // ======================================================
+  // 6️⃣ Normalización y limpieza
+  // ======================================================
+  profile.historialTipos = Array.from(new Set(profile.historialTipos));
+  profile.historialDistritos = Array.from(new Set(profile.historialDistritos));
 
   return profile;
 }
