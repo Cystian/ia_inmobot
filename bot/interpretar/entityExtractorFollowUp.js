@@ -1,130 +1,105 @@
 // /bot/interpretar/entityExtractorFollowUp.js
 // -------------------------------------------------------
-// Follow-up: refinamiento de filtros ya existentes.
-// Compatible con Vercel Edge (UTF-8 limpio).
+// FASE 5.7 — Follow-Up Inteligente
+// -------------------------------------------------------
+// - Ajustes suaves: más barato, más grande, más dormitorios, etc.
+// - Mantiene coherencia con filtros anteriores
+// - No rompe la búsqueda original
+// - Siempre retorna filtros válidos
 // -------------------------------------------------------
 
-export function extractFollowUpFilters(msg = "", lastFilters = {}, lastProperties = []) {
-  const lower = msg.toLowerCase();
-  const newFilters = { ...lastFilters };
+export function extractFollowUpFilters(msg, prev, lista = []) {
+  const text = (msg || "").toLowerCase().trim();
 
-  // ============================================
-  // PRECIO
-  // ============================================
-  const precios = lastProperties
-    .map((p) => Number(p.price) || 0)
-    .filter((n) => n > 0);
+  let filtros = { ...prev };
 
-  const maxPrev = Math.max(...precios, 0);
-  const minPrev = Math.min(...precios, 0);
-
-  // Frases: mas barato, mas economico
+  // ======================================================
+  // 1️⃣ MÁS BARATO / MÁS ECONÓMICO
+  // ======================================================
   if (
-    lower.includes("mas barato") ||
-    lower.includes("más barato") ||
-    lower.includes("mas economico") ||
-    lower.includes("más economico")
+    text.includes("mas barato") ||
+    text.includes("más barato") ||
+    text.includes("economico") ||
+    text.includes("económico")
   ) {
-    if (!newFilters.precio_max) {
-      const prom = precios.reduce((a, b) => a + b, 0) / (precios.length || 1);
-      newFilters.precio_max = Math.floor(prom * 0.85);
-    } else {
-      newFilters.precio_max = Math.floor(newFilters.precio_max * 0.9);
+    // Tomar el precio mínimo de la lista previa
+    const precios = lista.map(p => Number(p.price)).filter(n => !isNaN(n));
+
+    if (precios.length > 0) {
+      const nuevoMax = Math.min(...precios) * 0.95; // 5% más bajo
+      filtros.precio_max = Math.round(nuevoMax);
     }
-    if (newFilters.precio_max < minPrev) newFilters.precio_max = minPrev;
   }
 
-  // mas caro, algo mejor
-  if (
-    lower.includes("mas caro") ||
-    lower.includes("más caro") ||
-    lower.includes("algo mejor")
-  ) {
-    if (newFilters.precio_max) {
-      newFilters.precio_max = Math.floor(newFilters.precio_max * 1.15);
-    } else {
-      const prom = precios.reduce((a, b) => a + b, 0) / (precios.length || 1);
-      newFilters.precio_max = Math.floor(prom * 1.15);
+  // ======================================================
+  // 2️⃣ MÁS CARO (menos común)
+  // ======================================================
+  if (text.includes("mas caro") || text.includes("más caro") || text.includes("sube precio")) {
+    const precios = lista.map(p => Number(p.price)).filter(n => !isNaN(n));
+
+    if (precios.length > 0) {
+      const nuevoMin = Math.max(...precios) * 1.05;
+      filtros.precio_min = Math.round(nuevoMin);
     }
-    if (newFilters.precio_max < maxPrev) newFilters.precio_max = maxPrev;
   }
 
-  // menos de X
-  const menosMatch = lower.match(/menos de\s*(\d+)/);
-  if (menosMatch) newFilters.precio_max = Number(menosMatch[1]);
+  // ======================================================
+  // 3️⃣ MÁS GRANDE / MÁS ÁREA
+  // ======================================================
+  if (text.includes("mas grande") || text.includes("más grande") || text.includes("mas area")) {
+    const areas = lista.map(p => Number(p.area)).filter(n => !isNaN(n));
 
-  // maximo X
-  const maxMatch = lower.match(/maximo\s*(\d+)/);
-  if (maxMatch) newFilters.precio_max = Number(maxMatch[1]);
-
-  // ============================================
-  // COCHERAS
-  // ============================================
-  if (lower.includes("cochera") || lower.includes("cocheras") || lower.includes("parking")) {
-    const num = lower.match(/(\d+)\s*cocher/);
-    newFilters.cocheras = num ? Number(num[1]) : 1;
+    if (areas.length > 0) {
+      const nuevoMin = Math.max(...areas) * 1.05;
+      filtros.area_min = Math.round(nuevoMin);
+    }
   }
 
-  // ============================================
-  // BAÑOS
-  // ============================================
+  // ======================================================
+  // 4️⃣ MÁS DORMITORIOS
+  // ======================================================
+  if (text.includes("mas cuartos") || text.includes("más cuartos") || text.includes("más dorm")) {
+    const beds = lista.map(p => Number(p.bedrooms)).filter(n => !isNaN(n));
+
+    if (beds.length > 0) {
+      const nuevoMin = Math.max(...beds) + 1;
+      filtros.bedrooms = nuevoMin;
+    }
+  }
+
+  // ======================================================
+  // 5️⃣ SIMILARES / OTRA OPCIÓN / PARECIDA
+  // ======================================================
   if (
-    lower.includes("baño") ||
-    lower.includes("baños") ||
-    lower.includes("bano") ||
-    lower.includes("banos")
+    text.includes("similar") ||
+    text.includes("parecida") ||
+    text.includes("parecido") ||
+    text.includes("otra opcion") ||
+    text.includes("otra opción")
   ) {
-    const num = lower.match(/(\d+)\s*(baño|baños|bano|banos)/);
-    newFilters.bathrooms = num ? Number(num[1]) : 1;
+    // Usar ubicación y tipo de la propiedad más clickeada
+    const ref = lista[0];
+    if (ref) {
+      filtros.tipo = ref.tipo || filtros.tipo;
+      filtros.distritos = [ref.location?.toLowerCase()] || filtros.distritos;
+    }
   }
 
-  // ============================================
-  // DORMITORIOS
-  // ============================================
-  if (
-    lower.includes("dorm") ||
-    lower.includes("habitacion") ||
-    lower.includes("habitaciones") ||
-    lower.includes("cuarto")
-  ) {
-    const num = lower.match(/(\d+)\s*(dorm|hab|cuarto|habitacion)/);
-    newFilters.bedrooms = num ? Number(num[1]) : 1;
+  // ======================================================
+  // 6️⃣ LIMPIEZA FINAL (NO romper filtros)
+  // ======================================================
+  const clean = {};
+
+  for (const k in filtros) {
+    if (
+      filtros[k] !== null &&
+      filtros[k] !== undefined &&
+      filtros[k] !== "" &&
+      !(Array.isArray(filtros[k]) && filtros[k].length === 0)
+    ) {
+      clean[k] = filtros[k];
+    }
   }
 
-  // ============================================
-  // AREA
-  // ============================================
-  if (lower.includes("m2") || lower.includes("metros") || lower.includes("area")) {
-    const num = lower.match(/(\d+)\s*(m2|metros|metros cuadrados)/);
-    if (num) newFilters.area_min = Number(num[1]);
-  }
-
-  // ============================================
-  // DISTRITO
-  // ============================================
-  if (lower.includes("solo en nuevo chimbote")) newFilters.distritos = ["Nuevo Chimbote"];
-  if (lower.includes("solo en chimbote")) newFilters.distritos = ["Chimbote"];
-  if (lower.includes("solo en buenos aires")) newFilters.distritos = ["Buenos Aires"];
-
-  const soloMatch = lower.match(/solo en (.+)/);
-  if (soloMatch) {
-    const zona = soloMatch[1].trim();
-    newFilters.distritos = [
-      zona.charAt(0).toUpperCase() + zona.slice(1)
-    ];
-  }
-
-  // ============================================
-  // EXTRAS
-  // ============================================
-  newFilters.extras = newFilters.extras || [];
-
-  if (lower.includes("esquin")) newFilters.extras.push("esquinera");
-  if (lower.includes("parque")) newFilters.extras.push("frente_parque");
-  if (lower.includes("remodel")) newFilters.extras.push("remodelado");
-  if (lower.includes("estreno")) newFilters.extras.push("estreno");
-  if (lower.includes("amoblado")) newFilters.extras.push("amoblado");
-  if (lower.includes("negociable")) newFilters.extras.push("negociable");
-
-  return newFilters;
+  return clean;
 }
