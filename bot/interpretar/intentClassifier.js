@@ -1,13 +1,6 @@
 // /bot/interpretar/intentClassifier.js
 // -------------------------------------------------------
-// Clasificador de intención Groq — FASE 5.7 FINAL
-// -------------------------------------------------------
-// – Corrige respuestas fuera de contexto
-// – Evita textos interpretativos ("estoy buscando...")
-// – Follow-up más inteligente
-// – Detección reforzada de referencia a propiedad
-// – No inventa zonas
-// – JSON blindado
+// Clasificador de intención Groq — FASE 5.7 + E2
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -18,21 +11,26 @@ import { extractFollowUpFilters } from "./entityExtractorFollowUp.js";
 
 const client = new Groq({ apiKey: GROQ_API_KEY });
 
-// -------------------------------------------------------
-// 🔹 Listas de control
-// -------------------------------------------------------
-
-const SALUDOS_PUROS = [
-  "hola","buenas","buenos dias","buenas tardes","buenas noches",
-  "hey","holi","ola","👋"
-];
-
+// Palabras que disparan intención de búsqueda
 const PALABRAS_INTENCION = [
   "casa","departamento","depa","dpto","terreno","lote",
-  "local","oficina","comprar","venta","alquiler","alquilar",
-  "busco","quiero","propiedad","inmueble"
+  "local","oficina","propiedad","inmueble"
 ];
 
+// Adjetivos semánticos importantes
+const ADJETIVOS_SEMANTICOS = [
+  "bonita","bonito","grande","amplia","amplio","lujosa","lujoso",
+  "económica","economica","barata","barato","moderna","moderno",
+  "nueva","nuevo","remodelada","remodelado","centro","céntrica"
+];
+
+// Saludos
+const SALUDOS_PUROS = [
+  "hola","buenas","buenos dias","buenas tardes","buenas noches",
+  "hey","ola","👋"
+];
+
+// Follow-up triggers
 const FRASES_FOLLOW_UP = [
   "mas barato","más barato","mas economico","más economico",
   "mas opciones","más opciones","otra opcion","otra opción",
@@ -40,35 +38,36 @@ const FRASES_FOLLOW_UP = [
   "algo mas","algo más","siguiente","otra parecida"
 ];
 
-// 🔹 Detección fuerte de referencia a propiedad
+// Referencias a propiedad previa
 const PROPERTY_REF_WORDS = [
   "esa","ese","esta casa","esa casa","esa propiedad",
   "ese depa","ese departamento","esa vivienda",
   "la primera","la 1","la segunda","la 2","la tercera","la 3",
-  "me puedes dar mas detalles","más detalles","mas detalles",
-  "quiero saber mas","quiero más detalles"
+  "mas detalles","más detalles","quiero saber mas"
 ];
 
-// 🔹 Zonas válidas
+// Distritos válidos
 const ZONAS_VALIDAS = [
   "nuevo chimbote","chimbote","buenos aires",
   "bellamar","villa maria","la caleta","casma"
 ];
 
-// 🔹 Palabras clave de inversión
+// Palabras de inversión
 const KW_INVERSION = [
   "invertir","inversion","inversión","negocio","rentable",
   "retorno","ganancia","revalor","crezca","aprovechar"
 ];
 
 // -------------------------------------------------------
-// 🚀 FUNCIÓN PRINCIPAL
+// FUNCIÓN PRINCIPAL
 // -------------------------------------------------------
 
 export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   const text = msgNormalizado.toLowerCase().trim();
 
-  const contieneIntencion = PALABRAS_INTENCION.some(p => text.includes(p));
+  const contieneIntencion =
+    PALABRAS_INTENCION.some(p => text.includes(p));
+
   const esSaludoSimple = SALUDOS_PUROS.includes(text);
 
   const tieneSesionPrevia =
@@ -77,12 +76,25 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     session.lastProperties.length > 0;
 
   // ======================================================
-  // 1️⃣ Saludo único por sesión
+  // CAPTURA DE ADJETIVOS SEMÁNTICOS (para ranking)
+  // ======================================================
+  const detectedAdjectives = ADJETIVOS_SEMANTICOS.filter(a =>
+    text.includes(a)
+  );
+
+  const semanticPrefs = {};
+  if (detectedAdjectives.length > 0) {
+    semanticPrefs.adjectives = detectedAdjectives;
+  }
+
+  // ======================================================
+  // 1. SALUDO
   // ======================================================
   if (esSaludoSimple && !contieneIntencion && !session.hasGreeted) {
     return {
       intencion: "saludo_simple",
       filtrosBase: {},
+      semanticPrefs,
       iaRespuesta: MENSAJES.saludo_inicial,
       esSaludoSimple: true,
       esFollowUp: false
@@ -90,12 +102,13 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 2️⃣ Intención de inversión
+  // 2. INTENCIÓN DE INVERSIÓN
   // ======================================================
   if (KW_INVERSION.some(k => text.includes(k))) {
     return {
       intencion: "inversion",
       filtrosBase: {},
+      semanticPrefs,
       iaRespuesta: "",
       esSaludoSimple: false,
       esFollowUp: false
@@ -103,14 +116,15 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 3️⃣ Referencia fuerte a propiedad previa
+  // 3. REFERENCIA A PROPIEDAD PREVIA
   // ======================================================
-  const refiereAPropiedad = PROPERTY_REF_WORDS.some(w => text.includes(w));
+  const refiere = PROPERTY_REF_WORDS.some(w => text.includes(w));
 
-  if (tieneSesionPrevia && refiereAPropiedad) {
+  if (tieneSesionPrevia && refiere) {
     return {
       intencion: "pregunta_propiedad",
       filtrosBase: {},
+      semanticPrefs,
       iaRespuesta: MENSAJES.propiedad_referida,
       esSaludoSimple: false,
       esFollowUp: false
@@ -118,41 +132,35 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 4️⃣ Follow-up (más opciones, más barato)
+  // 4. FOLLOW-UP
   // ======================================================
-  const esFollowUp = FRASES_FOLLOW_UP.some(f => text.includes(f));
+  const followUp = FRASES_FOLLOW_UP.some(f => text.includes(f));
 
-  if (tieneSesionPrevia && esFollowUp) {
-    const filtrosPrevios = session.lastFilters || {};
-    const propiedadesPrevias = session.lastProperties || [];
-
-    const refinados = extractFollowUpFilters(
-      text,
-      filtrosPrevios,
-      propiedadesPrevias
-    );
-
+  if (tieneSesionPrevia && followUp) {
     return {
       intencion: session.lastIntent || "buscar_propiedades",
-      filtrosBase: refinados,
+      filtrosBase: extractFollowUpFilters(
+        text,
+        session.lastFilters || {},
+        session.lastProperties || []
+      ),
+      semanticPrefs,
       iaRespuesta: "",
-      esSaludoSimple: false,
       esFollowUp: true
     };
   }
 
   // ======================================================
-  // 5️⃣ Groq — Clasificación principal
+  // 5. LLAMADA A Groq (principal)
   // ======================================================
   const prompt = `
 Eres un asistente inmobiliario profesional.
 NO inventes zonas.
 NO inventes distritos.
-NO generes frases interpretativas ("estoy buscando...").
-Responde en JSON válido únicamente.
+NO generes textos interpretativos.
+Responde SOLO JSON.
 
 Mensaje: "${raw}"
-
 Formato:
 {
   "intencion": "buscar_propiedades|saludo|despedida|otro",
@@ -177,7 +185,7 @@ Formato:
       model: "llama-3.3-70b-versatile",
       temperature: 0.2,
       messages: [
-        { role: "system", content: "Responde SOLO JSON válido y limpio." },
+        { role: "system", content: "Responde solo JSON válido." },
         { role: "user", content: prompt }
       ]
     });
@@ -200,38 +208,32 @@ Formato:
     }
 
     let filtrosBase = ia.filtros;
-    let intencion = ia.intencion || (contieneIntencion ? "buscar_propiedades" : "otro");
-    let iaRespuesta = ia.respuesta || "";
+    let intencion =
+      ia.intencion || (contieneIntencion ? "buscar_propiedades" : "otro");
 
-    // ======================================================
-    // 6️⃣ Filtrar zonas inválidas
-    // ======================================================
+    // Filtrar zonas inválidas
     if (Array.isArray(filtrosBase.distritos)) {
-      filtrosBase.distritos = filtrosBase.distritos.filter(d =>
-        ZONAS_VALIDAS.includes(d.toLowerCase())
+      filtrosBase.distritos = filtrosBase.distritos.filter(z =>
+        ZONAS_VALIDAS.includes(z.toLowerCase())
       );
     }
-
-    // ======================================================
-    // 7️⃣ Ajustes finales
-    // ======================================================
-    if (intencion === "saludo") iaRespuesta = MENSAJES.saludo_inicial;
-    if (intencion === "despedida") iaRespuesta = MENSAJES.despedida;
 
     return {
       intencion,
       filtrosBase,
-      iaRespuesta,
+      semanticPrefs,
+      iaRespuesta: ia.respuesta || "",
       esSaludoSimple: false,
       esFollowUp: false
     };
 
-  } catch (error) {
-    logError("Error Groq", error);
+  } catch (err) {
+    logError("Error Groq", err);
 
     return {
       intencion: contieneIntencion ? "buscar_propiedades" : "otro",
       filtrosBase: {},
+      semanticPrefs,
       iaRespuesta: MENSAJES.ayuda_generica,
       esSaludoSimple: false,
       esFollowUp: false
