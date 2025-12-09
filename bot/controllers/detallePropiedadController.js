@@ -1,18 +1,51 @@
 // /bot/controllers/detallePropiedadController.js
 // -------------------------------------------------------
-// FASE 5.6 — DETALLE DE PROPIEDAD
-// - Property Memory sólido
-// - Atributo detectado con precisión
-// - Respuesta Premium sin spam
-// - Preparado para Fase 6 (Q&A contextual)
+// FASE 5.7 — DETALLE DE PROPIEDAD
+// - Selección inteligente de la propiedad (ordinal + semántico)
+// - Uso de description + distribution (campos extra BD)
+// - Respuestas elegantes y sin spam
+// - Compatible con SendMessageManager Premium
 // -------------------------------------------------------
 
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { updateSession } from "../interpretar/contextManager.js";
-import {
-  sendTextPremium,
-  sendImagePremium
-} from "../services/sendMessageManager.js";
+import { sendTextPremium, sendImagePremium } from "../services/sendMessageManager.js";
+
+function matchBySemantic(msg, lista) {
+  const lower = msg.toLowerCase();
+
+  // Número ordinal 1,2,3...
+  const ordinal = lower.match(/la\s*(\d+)/);
+  if (ordinal) {
+    const index = Number(ordinal[1]) - 1;
+    if (lista[index]) return lista[index];
+  }
+
+  // Coincidencia por precio
+  const precio = lower.match(/(\d{2,6})/);
+  if (precio) {
+    const num = Number(precio[1]);
+    const byPrice = lista.find(p => Math.abs(p.price - num) < 2000);
+    if (byPrice) return byPrice;
+  }
+
+  // Coincidencia por zona o parte del título
+  for (const p of lista) {
+    if (
+      lower.includes((p.location || "").toLowerCase()) ||
+      lower.includes((p.title || "").toLowerCase())
+    ) {
+      return p;
+    }
+  }
+
+  // Si dice “esta casa”, “esa casa” → tomar la última mostrada
+  if (lower.includes("esta") || lower.includes("esa")) {
+    return lista[0]; // fallback: primera de la lista
+  }
+
+  return lista[0]; // fallback seguro
+}
 
 const detallePropiedadController = {
   async responder(contexto = {}) {
@@ -21,39 +54,22 @@ const detallePropiedadController = {
 
     const lista = session?.lastProperties || [];
 
-    // =====================================================
-    // 0️⃣ Si no hay historial → no sé qué propiedad es “esa”
-    // =====================================================
+    // 0️⃣ Sin historial
     if (!Array.isArray(lista) || lista.length === 0) {
       await sendTextPremium(
         userPhone,
-        "Aún no te he mostrado propiedades como para identificar cuál quieres 😊.\n" +
-        "Dime por ejemplo: *casa en Nuevo Chimbote de 3 cuartos* y empiezo a mostrarte opciones.",
+        "Aún no te he mostrado propiedades como para identificar cuál es 😊.\nDime por ejemplo: *casa en Nuevo Chimbote de 3 cuartos* y empiezo a compartirte opciones.",
         session
       );
       return null;
     }
 
-    // =====================================================
-    // 1️⃣ Determinar QUÉ propiedad menciona
-    // =====================================================
-    let index = 0; // default: primera
+    // 1️⃣ Selección inteligente
+    const p = matchBySemantic(msg, lista);
 
-    if (msg.includes("segunda") || msg.includes("la 2")) index = 1;
-    if (msg.includes("tercera") || msg.includes("la 3")) index = 2;
-
-    // Límites defensivos
-    if (index >= lista.length) index = 0;
-
-    const p = lista[index];
-
-    // Guardamos la propiedad activa
     updateSession(userPhone, { lastSelectedProperty: p });
 
-    // =====================================================
-    // 2️⃣ Detectar qué atributo pregunta el usuario
-    // =====================================================
-
+    // 2️⃣ Detectar si pide un atributo específico
     const ask = {
       cocheras: /(coch|parking|estacionamiento)/.test(msg),
       banios: /(baño|baños|bano|banos)/.test(msg),
@@ -61,89 +77,82 @@ const detallePropiedadController = {
       precio: /(precio|cuanto cuesta|cuánto cuesta|usd|dolares)/.test(msg),
       papeles: /(papeles|documentos|sunarp|partida)/.test(msg),
       dormitorios: /(dorm|hab|cuarto|habitacion)/.test(msg),
-      ubicacion: /(donde queda|zona exacta|ubicación exacta|direccion)/.test(msg)
+      ubicacion: /(donde queda|zona|ubicación|direccion)/.test(msg),
+      detalles: /(detalles|mas info|más info|informacion|información)/.test(msg)
     };
 
     const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
     let respuesta = `📌 *Detalles de la propiedad que mencionas*\n\n`;
-
     let esPreguntaEspecifica = false;
 
-    // =====================================================
-    // 3️⃣ Responder atributos individuales
-    // =====================================================
-
-    if (ask.cocheras) {
+    // 3️⃣ Atributos individuales
+    if (ask.precio) {
       esPreguntaEspecifica = true;
-      respuesta += p.cocheras
-        ? `🚗 Tiene *${p.cocheras}* cochera(s).\n`
-        : `🚗 No tiene cochera registrada.\n`;
-    }
-
-    if (ask.banios) {
-      esPreguntaEspecifica = true;
-      respuesta += p.bathrooms
-        ? `🚿 Cuenta con *${p.bathrooms}* baño(s).\n`
-        : `🚿 No tengo la cantidad exacta de baños registrada.\n`;
+      respuesta += `💵 Precio: *US$ ${p.price}*\n`;
     }
 
     if (ask.dormitorios) {
       esPreguntaEspecifica = true;
-      respuesta += p.bedrooms
-        ? `🛏 Tiene *${p.bedrooms}* dormitorio(s).\n`
-        : `🛏 No aparece cantidad de dormitorios registrada.\n`;
+      respuesta += `🛏 Dormitorios: *${p.bedrooms || 0}*\n`;
+    }
+
+    if (ask.banios) {
+      esPreguntaEspecifica = true;
+      respuesta += `🚿 Baños: *${p.bathrooms || 0}*\n`;
+    }
+
+    if (ask.cocheras) {
+      esPreguntaEspecifica = true;
+      respuesta += `🚗 Cocheras: *${p.cocheras || 0}*\n`;
     }
 
     if (ask.area) {
       esPreguntaEspecifica = true;
-      respuesta += p.area
-        ? `📐 Área aproximada: *${p.area} m²*.\n`
-        : `📐 No tengo área registrada, puedo consultarla con el asesor.\n`;
-    }
-
-    if (ask.precio) {
-      esPreguntaEspecifica = true;
-      respuesta += p.price
-        ? `💵 Precio actual: *US$ ${p.price}*.\n`
-        : `💵 No tengo precio fijo registrado, puedo validarlo con el asesor.\n`;
-    }
-
-    if (ask.papeles) {
-      esPreguntaEspecifica = true;
-      respuesta += `📑 Sobre documentos (partida, cargas, etc.), puedo pedir confirmación al asesor. ¿Deseas que lo consulte?\n`;
+      respuesta += `📐 Área: *${p.area || "—"} m²*\n`;
     }
 
     if (ask.ubicacion) {
       esPreguntaEspecifica = true;
-      respuesta += p.location
-        ? `📍 Está ubicada en: *${p.location}*.\n`
-        : `📍 No tengo la ubicación exacta registrada, pero puedo confirmarla.\n`;
+      respuesta += `📍 Ubicación: *${p.location || "Por confirmar"}*\n`;
     }
 
-    // =====================================================
-    // 4️⃣ Si no pidió algo específico → enviar resumen elegante
-    // =====================================================
+    if (ask.papeles) {
+      esPreguntaEspecifica = true;
+      respuesta += `📑 Documentos listos para revisión. ¿Quieres que un asesor los valide?\n`;
+    }
+
+    // 3B️⃣ Detalles extendidos desde BD (description + distribution)
+    if (ask.detalles || msg.includes("mas detalles")) {
+      esPreguntaEspecifica = true;
+
+      respuesta += `\n📝 *Descripción:*  
+${p.description || "Sin descripción disponible."}\n\n`;
+
+      respuesta += `📦 *Distribución:*  
+${p.distribution || "Sin detalles de distribución registrados."}\n`;
+    }
+
+    // 4️⃣ Resumen elegante si no pidió algo específico
     if (!esPreguntaEspecifica) {
       respuesta += `🏡 *${p.title}*\n`;
-      respuesta += `📍 ${p.location || "Zona por confirmar"}\n`;
-      if (p.price) respuesta += `💵 US$ ${p.price}\n`;
-      if (p.bedrooms != null) respuesta += `🛏 ${p.bedrooms} dorm\n`;
-      if (p.bathrooms != null) respuesta += `🚿 ${p.bathrooms} baños\n`;
-      if (p.cocheras != null) respuesta += `🚗 ${p.cocheras} coch\n`;
-      if (p.area != null) respuesta += `📐 ${p.area} m²\n`;
+      respuesta += `📍 ${p.location}\n`;
+      respuesta += `💵 US$ ${p.price}\n`;
+      respuesta += `🛏 ${p.bedrooms} dorm – 🚿 ${p.bathrooms} baños – 🚗 ${p.cocheras} coch\n`;
+      respuesta += `📐 ${p.area} m²\n\n`;
+
+      if (p.description) {
+        respuesta += `📝 ${p.description}\n\n`;
+      }
     }
 
-    respuesta += `\n🔗 Ver más detalles: ${url}`;
+    respuesta += `🔗 Ver ficha completa: ${url}`;
 
-    // =====================================================
-    // 5️⃣ Enviar respuesta — sin spam
-    // =====================================================
+    // 5️⃣ Envío premium
     await sendTextPremium(userPhone, respuesta.trim(), session);
 
-    // Solo enviar imagen SI la pregunta NO era un simple atributo
     if (!esPreguntaEspecifica && p.image) {
-      const caption = `🏡 *${p.title}*\n💵 US$ ${p.price}\n📍 ${p.location}\n\n🔗 ${url}`;
-      await sendImagePremium(userPhone, p.image, caption, session);
+      const cap = `🏡 *${p.title}*\n💵 US$ ${p.price}\n📍 ${p.location}\n\n🔗 ${url}`;
+      await sendImagePremium(userPhone, p.image, cap, session);
     }
 
     return null;
