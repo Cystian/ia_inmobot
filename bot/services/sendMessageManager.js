@@ -1,31 +1,26 @@
 // /bot/services/sendMessageManager.js
 // -------------------------------------------------------
-// Capa Premium de Mensajería (VERSIÓN FASE 5 COMPLETA)
-// - Variación natural y controlada
-// - Antispam inteligente (texto + imagen)
-// - Prefijos suaves en contexto correcto
-// - Fallback seguro si Meta falla
-// - Preparado para Fase 6 (CRM + Reply Buttons)
-// -------------------------------------------------------
-
-// /bot/services/sendMessageManager.js
-// -------------------------------------------------------
-// Capa Premium de Mensajería (VERSIÓN FASE 5 COMPLETA)
+// Capa Premium de Mensajería – FASE 5.6 OFICIAL
+// - Prefijos naturales (no intrusivos)
+// - AntiSpam robusto (texto + imagen)
+// - Compatibilidad con sendMessage.js (reintentos Meta)
+// - Prevención de duplicados META Webhook
+// - Preparado para Fase 6 (botones, CRM)
 // -------------------------------------------------------
 
 import enviarMensaje, { enviarImagen } from "./sendMessage.js";
 import { updateSession } from "../interpretar/contextManager.js";
 
 // -------------------------------------------------------
-// Variaciones Premium
+// VARIACIONES PREMIUM
 // -------------------------------------------------------
 const SOFT_PREFIXES = [
   "Perfecto 👍",
   "Claro que sí 😊",
-  "Genial, te muestro:",
+  "Genial, mira esto 👇",
   "Aquí tienes 👇",
   "Listo Christian 👌",
-  "Encantado, revisa esta info:",
+  "Encantado, revisa esta opción:",
   "Déjame mostrarte:",
   "Excelente elección 👇"
 ];
@@ -41,7 +36,7 @@ const CIERRES = [
 ];
 
 // -------------------------------------------------------
-// Helpers
+// HELPERS
 // -------------------------------------------------------
 function randomPick(array) {
   return array[Math.floor(Math.random() * array.length)];
@@ -56,50 +51,83 @@ function isSimilar(a = "", b = "") {
 }
 
 // -------------------------------------------------------
+// EVITA DUPLICADOS META (Webhook retries)
+// -------------------------------------------------------
+function alreadySent(session, payloadHash) {
+  return session?.lastPayloadHash === payloadHash;
+}
+
+function generateHash(str) {
+  return normalize(str);
+}
+
+// -------------------------------------------------------
 // ENVÍO PREMIUM DE TEXTO
 // -------------------------------------------------------
-export async function sendTextPremium(userPhone, text, session) {
+export async function sendTextPremium(userPhone, text, session = {}) {
   if (!userPhone) return;
 
   let finalText = text.trim();
-  const low = finalText.toLowerCase();
+  const low = normalize(finalText);
 
+  // Prefijo suave si corresponde
   const triggersIntro = [
     "propiedad",
     "opciones",
     "te muestro",
     "aquí tienes",
     "encaja muy bien",
-    "mira esta opción"
+    "mira esta opción",
+    "sugeridas",
+    "alternativas"
   ];
 
   const debePrefix =
     triggersIntro.some((t) => low.includes(t)) &&
     !low.startsWith("perfecto") &&
-    !low.startsWith("genial");
+    !low.startsWith("genial") &&
+    !low.startsWith("aquí tienes");
 
   if (debePrefix) {
     finalText = `${randomPick(SOFT_PREFIXES)}\n\n${finalText}`;
   }
 
-  // Antispam inteligente
+  // Anti-spam: evita repetir el MISMO mensaje
   if (isSimilar(session?.lastBotMessage, finalText)) {
     console.log("⛔ Evitado spam de texto similar.");
     return;
   }
 
+  const payloadHash = generateHash(finalText);
+  if (alreadySent(session, payloadHash)) {
+    console.log("⛔ Evitado reenvío Meta (payload repetido).");
+    return;
+  }
+
   await enviarMensaje(userPhone, finalText);
-  updateSession(userPhone, { lastBotMessage: finalText });
+
+  updateSession(userPhone, {
+    lastBotMessage: finalText,
+    lastPayloadHash: payloadHash
+  });
 }
 
 // -------------------------------------------------------
 // ENVÍO PREMIUM DE IMÁGENES
 // -------------------------------------------------------
-export async function sendImagePremium(userPhone, imageUrl, caption, session) {
+export async function sendImagePremium(userPhone, imageUrl, caption = "", session = {}) {
   if (!userPhone || !imageUrl) return;
 
-  if (isSimilar(session?.lastBotImageCaption, caption)) {
+  const capNorm = normalize(caption);
+
+  if (isSimilar(session?.lastBotImageCaption, capNorm)) {
     console.log("⛔ Imagen ignorada por repetición.");
+    return;
+  }
+
+  const payloadHash = generateHash(imageUrl + "::" + capNorm);
+  if (alreadySent(session, payloadHash)) {
+    console.log("⛔ Evitado duplicado de imagen META.");
     return;
   }
 
@@ -107,8 +135,9 @@ export async function sendImagePremium(userPhone, imageUrl, caption, session) {
     await enviarImagen(userPhone, imageUrl, caption);
 
     updateSession(userPhone, {
-      lastBotImageCaption: caption,
-      lastBotImageURL: imageUrl
+      lastBotImageCaption: capNorm,
+      lastBotImageURL: imageUrl,
+      lastPayloadHash: payloadHash
     });
   } catch (e) {
     console.error("⚠ Error enviando imagen. Fallback a texto:", e);
@@ -117,15 +146,15 @@ export async function sendImagePremium(userPhone, imageUrl, caption, session) {
 }
 
 // -------------------------------------------------------
-// Cierre Premium (aleatorio)  **ÚNICA DECLARACIÓN**
+// CIERRE PREMIUM ALEATORIO
 // -------------------------------------------------------
 export function cierrePremium() {
   return randomPick(CIERRES);
 }
 
 // -------------------------------------------------------
-// Placeholder para Fase 6
+// Fase 6 – Envío de listas con botones
 // -------------------------------------------------------
-export async function sendListPremium(userPhone, title, buttons) {
-  // Se implementará en Fase 6
+export async function sendListPremium(userPhone, title, buttons = []) {
+  // Se implementará en la Fase 6
 }
