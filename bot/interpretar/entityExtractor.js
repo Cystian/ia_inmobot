@@ -1,24 +1,28 @@
 // /bot/interpretar/entityExtractor.js
 // -------------------------------------------------------
-// FASE 5.5 — EXTRACTOR DE ENTIDADES MEJORADO
-// - Modo estricto (NO inventa zonas)
+// FASE 5.6 — EXTRACTOR DE ENTIDADES ULTRA-ROBUSTO
+// - Modo estricto anti-invenciones
+// - Zonas dinámicas desde BD (incluso si hoy no tienen propiedades)
 // - Compatible con leads de Meta Ads
-// - Limpieza de mensajes reenviados
-// - Rango de precios inteligente
-// - Tipos de inmueble bien separados
-// - Preparado para Fase 6
+// - Limpieza de reenviados
+// - Precios inteligentes y tipos estrictos
 // -------------------------------------------------------
 
-// 🔹 Zonas reales que manejas (solo estas son válidas)
-const ZONAS_MAP = [
-  { match: "nuevo chimbote", label: "Nuevo Chimbote" },
-  { match: "chimbote", label: "Chimbote" },
-  { match: "buenos aires", label: "Buenos Aires" },
-  { match: "bellamar", label: "Bellamar" },
-  { match: "villa maria", label: "Villa María" },
-  { match: "la caleta", label: "La Caleta" }
+import { pool } from "../../db.js";
+import { cleanForwarded } from "./cleanForwarded.js";
+
+// 🔹 Zonas válidas fijas (cliente quiere conservarlas aunque hoy no haya propiedades)
+const ZONAS_FIJAS = [
+  "nuevo chimbote",
+  "chimbote",
+  "buenos aires",
+  "bellamar",
+  "villa maria",
+  "la caleta",
+  "casma"
 ];
 
+// 🔹 Extras detectables
 const EXTRAS_RULES = [
   { match: "frente a parque", key: "frente_parque" },
   { match: "frente al parque", key: "frente_parque" },
@@ -36,56 +40,74 @@ const EXTRAS_RULES = [
   { match: "patio", key: "patio" }
 ];
 
-// 🔹 Detecta mensajes de Meta Leads (Facebook Ads)
+// -------------------------------------------------------
+// 🔹 Consulta BD en tiempo real para obtener zonas reales
+// -------------------------------------------------------
+async function obtenerZonasDesdeBD() {
+  try {
+    const [rows] = await pool.query(`
+      SELECT DISTINCT location FROM properties
+      WHERE location IS NOT NULL AND location <> ''
+    `);
+
+    return rows.map(r => r.location.toLowerCase().trim());
+  } catch {
+    return [];
+  }
+}
+
+// -------------------------------------------------------
+// 🔹 Meta Lead Detector
+// -------------------------------------------------------
 function esLeadMeta(msg) {
+  const m = msg.toLowerCase();
   return (
-    msg.includes("nombre:") ||
-    msg.includes("correo:") ||
-    msg.includes("email:") ||
-    msg.includes("teléfono:") ||
-    msg.includes("telefono:") ||
-    msg.includes("presupuesto")
+    m.includes("nombre:") ||
+    m.includes("correo:") ||
+    m.includes("email:") ||
+    m.includes("telefono:") ||
+    m.includes("teléfono:") ||
+    m.includes("presupuesto")
   );
 }
 
-// 🔹 Limpia texto reenviado
-function limpiarReenviado(msg) {
-  return msg
-    .replace(/reenviado/gi, "")
-    .replace(/forwarded/gi, "")
-    .replace(/^>/gm, "") // elimina ">" de textos reenviados
-    .trim();
-}
+// -------------------------------------------------------
+// 🔹 ENRICH FILTERS MAIN FUNCTION
+// -------------------------------------------------------
+export async function enrichFiltersWithRules(msgRaw, filtrosBase = {}, session = {}) {
+  // Limpiar texto
+  const msg = cleanForwarded(msgRaw.toLowerCase());
 
-export function enrichFiltersWithRules(msgRaw, filtrosBase = {}, session = {}) {
-  const msg = limpiarReenviado(msgRaw.toLowerCase());
-
+  // Filtros acumulados
   const filtros = {
     ...(session.lastFilters || {}),
     ...(filtrosBase || {})
   };
 
   // ======================================================
-  // 🔹 1. Lead de Facebook
+  // 1. Leads de Meta Ads → Salida inmediata
   // ======================================================
   if (esLeadMeta(msg)) {
-    filtros.status = filtros.status || "venta"; // Asume intención comercial inmediata
-    return filtros; // No necesita procesar nada más
+    filtros.status = filtros.status || "venta";
+    return filtros;
   }
 
   // ======================================================
-  // 🔹 2. Detección estricta de zonas reales
+  // 2. Zonas válidas fusionadas (fijas + BD)
   // ======================================================
+  const zonasBD = await obtenerZonasDesdeBD();
+  const zonasValidas = new Set([...ZONAS_FIJAS, ...zonasBD]);
+
   const dist = new Set(filtros.distritos || []);
 
-  for (const z of ZONAS_MAP) {
-    if (msg.includes(z.match)) dist.add(z.label);
-  }
+  zonasValidas.forEach(z => {
+    if (msg.includes(z)) dist.add( capitalizar(z) );
+  });
 
   filtros.distritos = Array.from(dist);
 
   // ======================================================
-  // 🔹 3. Status
+  // 3. Status
   // ======================================================
   if (msg.includes("comprar") || msg.includes("venta") || msg.includes("vendo"))
     filtros.status = "venta";
@@ -99,7 +121,7 @@ export function enrichFiltersWithRules(msgRaw, filtrosBase = {}, session = {}) {
     filtros.status = "alquiler";
 
   // ======================================================
-  // 🔹 4. Tipo de inmueble (MODO ESTRICTO)
+  // 4. Tipos estrictos
   // ======================================================
   if (msg.includes("casa")) filtros.tipo = "casa";
   else if (msg.includes("departamento") || msg.includes("depa") || msg.includes("dpto"))
@@ -112,34 +134,32 @@ export function enrichFiltersWithRules(msgRaw, filtrosBase = {}, session = {}) {
     filtros.tipo = "oficina";
 
   // ======================================================
-  // 🔹 5. Dormitorios
+  // 5. Dormitorios
   // ======================================================
   const beds = msg.match(/(\d+)\s*(dorm|hab|cuarto|habitaciones?)/);
   if (beds) filtros.bedrooms = Number(beds[1]);
 
   // ======================================================
-  // 🔹 6. Baños
+  // 6. Baños
   // ======================================================
   const baths = msg.match(/(\d+)\s*(baño|banos|baños)/);
   if (baths) filtros.bathrooms = Number(baths[1]);
 
   // ======================================================
-  // 🔹 7. Cocheras
+  // 7. Cocheras
   // ======================================================
   const coch = msg.match(/(\d+)\s*(cocheras?|parking|estacionamiento)/);
   if (coch) filtros.cocheras = Number(coch[1]);
 
   // ======================================================
-  // 🔹 8. Área mínima (m2)
+  // 8. Área mínima
   // ======================================================
-  const areaMatch = msg.match(/(\d+)\s*(m2|metros|metros cuadrados)/);
-  if (areaMatch) filtros.area_min = Number(areaMatch[1]);
+  const area = msg.match(/(\d+)\s*(m2|metros|metros cuadrados)/);
+  if (area) filtros.area_min = Number(area[1]);
 
   // ======================================================
-  // 🔹 9. Rango de precios inteligente
+  // 9. Rango de precios
   // ======================================================
-
-  // entre 100 y 200 mil
   const rango = msg.match(/entre\s+(\d+)\s*(mil|k)?\s+y\s+(\d+)\s*(mil|k)?/);
   if (rango) {
     let min = Number(rango[1]);
@@ -150,16 +170,15 @@ export function enrichFiltersWithRules(msgRaw, filtrosBase = {}, session = {}) {
     filtros.precio_max = max;
   }
 
-  // hasta 120 mil / menos de 90k
-  const maxSimple = msg.match(/(hasta|menos de)\s+(\d+)\s*(mil|k)?/);
-  if (maxSimple) {
-    let n = Number(maxSimple[2]);
-    if (maxSimple[3]) n *= 1000;
+  const simple = msg.match(/(hasta|menos de)\s+(\d+)\s*(mil|k)?/);
+  if (simple) {
+    let n = Number(simple[2]);
+    if (simple[3]) n *= 1000;
     filtros.precio_max = n;
   }
 
   // ======================================================
-  // 🔹 10. Extras
+  // 10. Extras
   // ======================================================
   const extras = new Set(filtros.extras || []);
   for (const rule of EXTRAS_RULES) {
@@ -168,4 +187,12 @@ export function enrichFiltersWithRules(msgRaw, filtrosBase = {}, session = {}) {
   filtros.extras = Array.from(extras);
 
   return filtros;
+}
+
+
+// -------------------------------------------------------
+// Helper: capitalizar zonas
+// -------------------------------------------------------
+function capitalizar(str = "") {
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
