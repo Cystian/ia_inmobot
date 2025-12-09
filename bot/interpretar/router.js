@@ -1,11 +1,6 @@
 // /bot/interpretar/router.js
 // -------------------------------------------------------
-// Router oficial FASE 5.6
-// ● Maneja leads de Facebook
-// ● Saludo único por sesión
-// ● Follow-up inteligente
-// ● Inversión integrada
-// ● Zero loops
+// Router oficial FASE 5.7
 // -------------------------------------------------------
 
 import propiedadesController from "../controllers/propiedadesController.js";
@@ -18,58 +13,38 @@ import { MENSAJES } from "../utils/messages.js";
 export async function routeIntent(intencion, filtros, contexto = {}) {
   const { esFollowUp, session = {}, userPhone } = contexto;
 
-  // ==============================================
-  // 0️⃣ LEAD DE FACEBOOK (alta prioridad)
-  // ==============================================
+  // 0️⃣ LEAD META
   if (intencion === "lead_meta" || session.isLead) {
-    return `
-Gracias por tu interés 👍  
-Voy a analizar tus datos y prepararte opciones ideales según tu presupuesto.
-
-¿Tienes alguna zona de preferencia?
-    `;
+    return MENSAJES.lead_detectado;
   }
 
-  // ==============================================
-  // 1️⃣ FOLLOW-UP INTELIGENTE
-  // ==============================================
+  // 1️⃣ FOLLOW UP
   if (esFollowUp) {
     const prev = session.lastIntent || "buscar_propiedades";
 
     switch (prev) {
       case "buscar_propiedades":
-        return propiedadesController.buscar(filtros, {
-          ...contexto,
-          esFollowUp: true
-        });
+        return propiedadesController.buscar(filtros, { ...contexto, esFollowUp: true });
 
       case "pregunta_propiedad":
         return detallePropiedadController.responder(contexto);
 
       case "inversion":
-        return inversionController.recomendar(filtros, {
-          ...contexto,
-          esFollowUp: true
-        });
+        return inversionController.recomendar(filtros, { ...contexto, esFollowUp: true });
 
       default:
         return ayudaController.generica(contexto);
     }
   }
 
-  // ==============================================
   // 2️⃣ INTENCIONES PRINCIPALES
-  // ==============================================
   switch (intencion) {
     case "buscar_propiedades":
       return propiedadesController.buscar(filtros, contexto);
 
     case "saludo":
     case "saludo_simple":
-      // Saludo único por sesión
-      if (session.hasGreeted) {
-        return null; // no volvemos a saludar
-      }
+      if (session.hasGreeted) return null;
       return saludoController.saludar();
 
     case "pregunta_propiedad":
@@ -82,9 +57,6 @@ Voy a analizar tus datos y prepararte opciones ideales según tu presupuesto.
       return MENSAJES.despedida;
 
     default:
-      // ==============================================
-      // 3️⃣ Fallback corporativo reforzado (intención “otro”)
-      // ==============================================
       return ayudaController.generica(contexto);
   }
 }
