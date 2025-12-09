@@ -1,11 +1,12 @@
 // /bot/interpretar/intentClassifier.js
 // -------------------------------------------------------
-// Clasificador de intención Groq optimizado FASE 5.5
-// - Nunca inventa distritos ni zonas
-// - Filtros estrictos tipo/precio
-// - Follow-up asistido real
+// Clasificador de intención Groq — FASE 5.6 Optimizada
+// - Bloqueo total de zonas inventadas
+// - Detección nativa de intención de inversión
 // - Saludo único por sesión
-// - Cero respuestas tipo “Lima / provincia”
+// - JSON Groq blindado
+// - Follow-up refinado real
+// - Preparado para Fase 6
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -17,7 +18,7 @@ import { extractFollowUpFilters } from "./entityExtractorFollowUp.js";
 const client = new Groq({ apiKey: GROQ_API_KEY });
 
 // -------------------------------------------------------
-// LISTAS CONTROLADAS
+// 🔹 LISTAS DE CONTROL
 // -------------------------------------------------------
 
 const SALUDOS_PUROS = [
@@ -44,6 +45,25 @@ const PROPERTY_REF_WORDS = [
   "la 2", "la tercera", "la 3", "ver esa"
 ];
 
+// 🔹 Zonas permitidas (evita inventos de Groq)
+const ZONAS_VALIDAS = [
+  "nuevo chimbote",
+  "chimbote",
+  "buenos aires",
+  "bellamar",
+  "villa maria",
+  "la caleta",
+  "casma" // opcional
+];
+
+// 🔹 Palabras clave de inversión
+const KW_INVERSION = [
+  "invertir", "inversion", "inversión",
+  "revalorice", "revalorizar", "revalorizacion",
+  "negocio", "rentable", "retorno", "ganancia",
+  "rinde", "revaloriza", "crezca", "aprovechar"
+];
+
 // -------------------------------------------------------
 // 🚀 FUNCIÓN PRINCIPAL
 // -------------------------------------------------------
@@ -60,7 +80,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     session.lastProperties.length > 0;
 
   // ======================================================
-  // 1️⃣ Saludo puro — pero solo si no saludó antes
+  // 1️⃣ Saludo único por sesión
   // ======================================================
   if (esSaludoSimple && !contieneIntencion && !session.hasGreeted) {
     return {
@@ -73,7 +93,20 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 2️⃣ Referencia a propiedad ya mostrada
+  // 2️⃣ Detecta intención de inversión (sin IA)
+  // ======================================================
+  if (KW_INVERSION.some(k => text.includes(k))) {
+    return {
+      intencion: "inversion",
+      filtrosBase: {},
+      iaRespuesta: "",
+      esSaludoSimple: false,
+      esFollowUp: false
+    };
+  }
+
+  // ======================================================
+  // 3️⃣ referencia a propiedad previa
   // ======================================================
   const refiereAPropiedad = PROPERTY_REF_WORDS.some(w => text.includes(w));
 
@@ -88,7 +121,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 3️⃣ Follow-up (Fase 5.5 asistido)
+  // 4️⃣ Follow-up refinado
   // ======================================================
   const esFollowUp = FRASES_FOLLOW_UP.some(f => text.includes(f));
 
@@ -112,16 +145,17 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 4️⃣ Groq (pero con RESTRICCIONES ALTAS)
+  // 5️⃣ Groq — Clasificador principal
   // ======================================================
   const prompt = `
 Eres un asistente inmobiliario.
-DEVUELVE SOLO JSON.
 NO inventes distritos.
-NO menciones Lima, Miraflores, San Isidro, Barranco ni zonas inexistentes.
-Si el usuario menciona una zona, respétala EXACTAMENTE como la escribió.
+NUNCA menciones Lima, Miraflores, San Isidro, Barranco ni zonas fuera del mensaje.
+Devuelve SOLO JSON válido.
 
-Formato EXACTO:
+Mensaje del usuario: "${raw}"
+
+Formato:
 {
   "intencion": "buscar_propiedades|saludo|despedida|otro",
   "filtros": {
@@ -138,16 +172,14 @@ Formato EXACTO:
   },
   "respuesta": ""
 }
-
-Mensaje del usuario: "${raw}"
 `;
 
   try {
     const completion = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
-      temperature: 0.2,
+      temperature: 0.25,
       messages: [
-        { role: "system", content: "Responde SOLO JSON válido." },
+        { role: "system", content: "Responde SOLO JSON válido y limpio." },
         { role: "user", content: prompt }
       ]
     });
@@ -164,18 +196,28 @@ Mensaje del usuario: "${raw}"
       ia = {};
     }
 
+    // Guardia JSON
+    if (!ia || typeof ia !== "object" || !ia.filtros) {
+      ia = {
+        intencion: contieneIntencion ? "buscar_propiedades" : "otro",
+        filtros: {}
+      };
+    }
+
     const filtrosBase = ia.filtros || {};
     let intencion =
       ia.intencion || (contieneIntencion ? "buscar_propiedades" : "otro");
     let iaRespuesta = ia.respuesta || "";
 
-    // Corrección de saludos
+    // Corrección de saludos y despedidas
     if (intencion === "saludo") iaRespuesta = MENSAJES.saludo_inicial;
     if (intencion === "despedida") iaRespuesta = MENSAJES.despedida;
 
-    // BLOQUEO FINAL: NO inventar distritos
+    // 🚫 FILTRADO FINAL — SOLO zonas válidas
     if (Array.isArray(filtrosBase.distritos)) {
-      filtrosBase.distritos = filtrosBase.distritos.filter((d) => d.length <= 40);
+      filtrosBase.distritos = filtrosBase.distritos.filter((d) =>
+        ZONAS_VALIDAS.includes(d.toLowerCase())
+      );
     }
 
     return {
