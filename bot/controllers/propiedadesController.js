@@ -1,8 +1,8 @@
 // /bot/controllers/propiedadesController.js
 // -------------------------------------------------------
-// Controlador FASE 5.6 — Totalmente alineado con:
-// - IntentClassifier 5.6
-// - EntityExtractor 5.6
+// Controlador FASE 5.7 — Alineado con:
+// - IntentClassifier 5.7
+// - EntityExtractor 5.6+
 // - SendMessageManager Premium
 // - Follow-Up real, sin loops ni repeticiones
 // - Paginación inteligente compatible con inversión
@@ -13,7 +13,12 @@ import {
   buscarSugeridas
 } from "../services/propiedadesService.js";
 
-import { sendTextPremium, sendImagePremium, cierrePremium } from "../services/sendMessageManager.js";
+import {
+  sendTextPremium,
+  sendImagePremium,
+  cierrePremium
+} from "../services/sendMessageManager.js";
+
 import { updateSession } from "../interpretar/contextManager.js";
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
@@ -23,36 +28,47 @@ const ITEMS_PER_PAGE = 6;
 
 // Activadores de follow-up explícito
 const FOLLOW_TRIGGERS = [
-  "más opciones", "mas opciones",
-  "muestrame mas", "muéstrame más",
-  "otra opcion", "otra opción",
-  "siguiente", "más", "mas"
+  "más opciones","mas opciones",
+  "muestrame mas","muéstrame más",
+  "otra opcion","otra opción",
+  "siguiente","más","mas"
 ];
 
 const propiedadesController = {
   async buscar(filtros = {}, contexto = {}) {
-    const { iaRespuesta, userPhone, session, rawMessage, semanticPrefs, esFollowUp } = contexto;
+    const {
+      iaRespuesta,       // ya no lo usamos para intro, pero lo conservamos por compat
+      userPhone,
+      session,
+      rawMessage,
+      semanticPrefs,
+      esFollowUp
+    } = contexto;
 
-    logInfo("BUSCAR PROPIEDADES — FASE 5.6", {
+    logInfo("BUSCAR PROPIEDADES — FASE 5.7", {
       filtros,
       rawMessage,
       semanticPrefs,
       esFollowUp
     });
 
-    const msg = rawMessage?.toLowerCase() || "";
+    const msg = (rawMessage || "").toLowerCase();
     let page = esFollowUp ? (session.lastPage || 1) : 1;
 
     // ==========================================================
-    // 1️⃣ BÚSQUEDA PRINCIPAL
+    // 1️⃣ BÚSQUEDA PRINCIPAL (con ranking semántico)
     // ==========================================================
     let propiedades = await buscarPropiedades(filtros, semanticPrefs);
 
     // ==========================================================
-    // 2️⃣ SIN RESULTADOS → Buscar sugeridas
+    // 2️⃣ SIN RESULTADOS → SUGERIDAS
     // ==========================================================
     if (propiedades.length === 0) {
-      await sendTextPremium(userPhone, MENSAJES.intro_propiedades_sugeridas, session);
+      await sendTextPremium(
+        userPhone,
+        MENSAJES.intro_propiedades_sugeridas,
+        session
+      );
 
       propiedades = await buscarSugeridas(filtros);
 
@@ -74,7 +90,7 @@ const propiedadesController = {
     }
 
     // ==========================================================
-    // 3️⃣ FOLLOW-UP AVANZADO (el usuario quiere MÁS)
+    // 3️⃣ FOLLOW-UP EXPLÍCITO (usuario pide MÁS)
     // ==========================================================
     const isFollowTrigger = FOLLOW_TRIGGERS.some(t => msg.includes(t));
 
@@ -101,7 +117,8 @@ const propiedadesController = {
     if (propsPagina.length === 0) {
       await sendTextPremium(
         userPhone,
-        "Ya no tengo más propiedades dentro de estos filtros. 😊\nPuedo ampliar zona, precio o dormitorios si deseas.",
+        "Ya no tengo más propiedades dentro de estos filtros. 😊\n" +
+          "Puedo ampliar zona, precio o dormitorios si deseas.",
         session
       );
 
@@ -112,12 +129,12 @@ const propiedadesController = {
     }
 
     // ==========================================================
-    // 6️⃣ INTRO (solo primera vez)
+    // 6️⃣ INTRO (solo primera vez, SIN usar texto de Groq)
     // ==========================================================
     if (!esFollowUp && !isFollowTrigger) {
       await sendTextPremium(
         userPhone,
-        iaRespuesta || MENSAJES.intro_propiedades_default,
+        MENSAJES.intro_propiedades_default,
         session
       );
     }
@@ -165,7 +182,6 @@ const propiedadesController = {
         "Estas son *todas* las opciones disponibles según tu búsqueda 😊.",
         session
       );
-
       await sendTextPremium(userPhone, cierrePremium(), session);
     }
 
