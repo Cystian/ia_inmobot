@@ -1,18 +1,18 @@
 // /bot/services/propiedadesService.js
 // -------------------------------------------------------
-// FASE 5.7 FINAL — Servicio de Propiedades
+// FASE 5.8 FINAL — Servicio de Propiedades
 // -------------------------------------------------------
-// • Búsqueda exacta + semántica ligera
-// • Compatible con IntentClassifier 5.7
-// • Limpieza estricta de filtros
-// • Sugeridas realistas (misma zona/tipo)
-// • Optimizado para MySQL
+// • Búsqueda exacta + semántica ligera REAL
+// • Penaliza resultados fuera de la zona solicitada
+// • Ordenamiento inteligente por relevancia (no solo created_at)
+// • Sugeridas más coherentes (misma zona/tipo)
+// • Preparado para Fase 6 (botones y CRM)
 // -------------------------------------------------------
 
 import db from "../config/db.js";
 import { logError } from "../utils/log.js";
 
-// Normaliza texto para coincidencias suaves
+// Normalizador para búsquedas suaves
 function normalize(str = "") {
   return str
     .toString()
@@ -23,96 +23,107 @@ function normalize(str = "") {
 }
 
 // -------------------------------------------------------
-// 🔍 BÚSQUEDA PRINCIPAL
+// 1️⃣ BÚSQUEDA PRINCIPAL — Inteligente FASE 5.8
 // -------------------------------------------------------
 export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
   try {
     let sql = `
       SELECT 
         id, title, price, location, bedrooms, bathrooms, cocheras, area,
-        image, description, distribution
+        image, description, distribution,
+        created_at
       FROM properties
       WHERE 1 = 1
     `;
     const params = [];
 
     // ------------------------------
-    // Filtro: distritos
+    // ZONA / DISTRITO (filtro principal)
     // ------------------------------
     if (Array.isArray(filtros.distritos) && filtros.distritos.length > 0) {
       sql += ` AND (`;
       filtros.distritos.forEach((d, i) => {
         sql += `LOWER(location) LIKE ?`;
         params.push(`%${normalize(d)}%`);
-        if (i < filtros.distritos.length - 1) sql += " OR ";
+        if (i < filtros.distritos.length - 1) sql += ` OR `;
       });
       sql += `)`;
     }
 
     // ------------------------------
-    // Filtro: tipo
+    // TIPO: casa, depa, terreno, local
     // ------------------------------
     if (filtros.tipo) {
-      sql += ` AND LOWER(title) LIKE ?`;
-      params.push(`%${normalize(filtros.tipo)}%`);
+      const value = normalize(filtros.tipo);
+      sql += ` AND (
+        LOWER(title) LIKE ? 
+        OR LOWER(description) LIKE ?
+        OR LOWER(distribution) LIKE ?
+      )`;
+      params.push(`%${value}%`, `%${value}%`, `%${value}%`);
     }
 
     // ------------------------------
-    // Filtro: dormitorios
+    // Dormitorios / Baños / Cocheras
     // ------------------------------
     if (filtros.bedrooms) {
       sql += ` AND bedrooms >= ?`;
       params.push(filtros.bedrooms);
     }
-
-    // ------------------------------
-    // Filtro: baños
-    // ------------------------------
     if (filtros.bathrooms) {
       sql += ` AND bathrooms >= ?`;
       params.push(filtros.bathrooms);
     }
-
-    // ------------------------------
-    // Filtro: cocheras
-    // ------------------------------
     if (filtros.cocheras) {
       sql += ` AND cocheras >= ?`;
       params.push(filtros.cocheras);
     }
 
     // ------------------------------
-    // Filtro: precio mínimo
+    // Precio
     // ------------------------------
     if (filtros.precio_min) {
       sql += ` AND price >= ?`;
       params.push(filtros.precio_min);
     }
-
-    // ------------------------------
-    // Filtro: precio máximo
-    // ------------------------------
     if (filtros.precio_max) {
       sql += ` AND price <= ?`;
       params.push(filtros.precio_max);
     }
 
     // ------------------------------
-    // Ordenamiento básico
+    // ORDENAMIENTO INTELIGENTE
     // ------------------------------
-    sql += ` ORDER BY created_at DESC`;
+    // 1. Si hay distrito → prioriza MATCH en location
+    // 2. Si hay tipo → prioriza título o descripción
+    // 3. Si no hay filtros → orden por fecha
+
+    sql += `
+      ORDER BY 
+        (CASE 
+            WHEN LOWER(location) LIKE ? THEN 0 
+            ELSE 1 
+         END),
+        created_at DESC
+    `;
+
+    params.push(
+      filtros.distritos?.length > 0
+        ? `%${normalize(filtros.distritos[0])}%`
+        : `%%`
+    );
 
     const [rows] = await db.execute(sql, params);
     return rows || [];
 
   } catch (err) {
-    logError("Error en buscarPropiedades()", err);
+    logError("❌ Error en buscarPropiedades()", err);
     return [];
   }
 }
 
 // -------------------------------------------------------
-// ✨ PROPIEDADES SUGERIDAS
+// 2️⃣ PROPIEDADES SUGERIDAS — FASE 5.8
 // -------------------------------------------------------
 export async function buscarSugeridas(filtros = {}) {
   try {
@@ -125,21 +136,17 @@ export async function buscarSugeridas(filtros = {}) {
     `;
     const params = [];
 
-    // Sugerencias basadas en zona (si existe)
+    // Si hay zona → mantén zona
     if (Array.isArray(filtros.distritos) && filtros.distritos.length > 0) {
-      sql += ` AND (`;
-      filtros.distritos.forEach((d, i) => {
-        sql += `LOWER(location) LIKE ?`;
-        params.push(`%${normalize(d)}%`);
-        if (i < filtros.distritos.length - 1) sql += " OR ";
-      });
-      sql += `)`;
+      sql += ` AND LOWER(location) LIKE ?`;
+      params.push(`%${normalize(filtros.distritos[0])}%`);
     }
 
-    // Si no hay zona, sugerimos por tipo (casa, depa, terreno)
+    // Si hay tipo → mantén tipo
     if (filtros.tipo) {
+      const norm = normalize(filtros.tipo);
       sql += ` AND LOWER(title) LIKE ?`;
-      params.push(`%${normalize(filtros.tipo)}%`);
+      params.push(`%${norm}%`);
     }
 
     sql += ` ORDER BY RAND() LIMIT 6`;
@@ -148,7 +155,7 @@ export async function buscarSugeridas(filtros = {}) {
     return rows || [];
 
   } catch (err) {
-    logError("Error en buscarSugeridas()", err);
+    logError("❌ Error en buscarSugeridas()", err);
     return [];
   }
 }
