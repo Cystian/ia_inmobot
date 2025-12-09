@@ -1,6 +1,7 @@
 // /bot/interpretar/index.js
 // -------------------------------------------------------
 // Motor principal FASE 5.6
+// - Limpieza avanzada de texto reenviado
 // - Maneja sesión
 // - IA (Groq) + reglas estrictas
 // - Follow-up real
@@ -8,6 +9,7 @@
 // - Leads de Facebook Ads
 // -------------------------------------------------------
 
+import { cleanForwarded } from "./cleanForwarded.js"; // ← NUEVO
 import { normalizeText } from "./normalize.js";
 import { getIaAnalysis } from "./intentClassifier.js";
 import { enrichFiltersWithRules } from "./entityExtractor.js";
@@ -44,17 +46,21 @@ const KW_INVERSION = [
 ];
 
 export default async function interpretar(userMessage = "", userPhone = "") {
-  const raw = userMessage || "";
+  // ======================================================
+  // 0️⃣ LIMPIEZA PROFESIONAL ANTES QUE TODO
+  // ======================================================
+  const rawOriginal = userMessage || "";
+  const raw = cleanForwarded(rawOriginal);         // ← LÍNEA NUEVA CLAVE
   const msgNormalizado = normalizeText(raw);
   const lower = raw.toLowerCase().trim();
 
   // ======================================================
-  // 1️⃣ OBTENER SESIÓN ANTES DE CUALQUIER PROCESO
+  // 1️⃣ OBTENER SESIÓN
   // ======================================================
   const session = getSession(userPhone);
 
   // ======================================================
-  // 2️⃣ Detectar lead de Meta Ads ANTES que cualquier IA
+  // 2️⃣ Detectar Lead de Meta Ads (siempre ANTES de IA)
   // ======================================================
   if (esLeadMeta(lower)) {
     updateSession(userPhone, {
@@ -67,7 +73,7 @@ export default async function interpretar(userMessage = "", userPhone = "") {
   }
 
   // ======================================================
-  // 3️⃣ Obtener IA (intención + filtros base)
+  // 3️⃣ Análisis de IA (intent + filtros base)
   // ======================================================
   const {
     intencion,
@@ -80,14 +86,14 @@ export default async function interpretar(userMessage = "", userPhone = "") {
   let intencionFinal = intencion;
 
   // ======================================================
-  // 4️⃣ Intento de inversión (tiene prioridad sobre IA)
+  // 4️⃣ Intento de inversión (regla local prioritaria)
   // ======================================================
   if (KW_INVERSION.some(k => lower.includes(k))) {
     intencionFinal = "inversion";
   }
 
   // ======================================================
-  // 5️⃣ Manejo de saludo único por sesión
+  // 5️⃣ Saludo único por sesión
   // ======================================================
   if (esSaludoSimple && !session.hasGreeted) {
     updateSession(userPhone, { hasGreeted: true });
@@ -95,12 +101,16 @@ export default async function interpretar(userMessage = "", userPhone = "") {
   }
 
   // ======================================================
-  // 6️⃣ Aplicar reglas adicionales (strict zones, baños, m2…)
+  // 6️⃣ Reglas adicionales estrictas
   // ======================================================
-  const filtrosFinales = enrichFiltersWithRules(msgNormalizado, filtrosBase, session);
+  const filtrosFinales = enrichFiltersWithRules(
+    msgNormalizado,
+    filtrosBase,
+    session
+  );
 
   // ======================================================
-  // 7️⃣ Preferencias semánticas (premium, moderno…)
+  // 7️⃣ Preferencias semánticas
   // ======================================================
   const semanticPrefs = extractSemanticPreferences(msgNormalizado, session);
 
@@ -113,7 +123,7 @@ export default async function interpretar(userMessage = "", userPhone = "") {
     lastFilters: filtrosFinales,
     semanticPrefs,
     esFollowUp,
-    hasGreeted: true // evita saludos repetidos
+    hasGreeted: true
   });
 
   // ======================================================
@@ -128,9 +138,6 @@ export default async function interpretar(userMessage = "", userPhone = "") {
     esFollowUp
   });
 
-  // ======================================================
-  // 🔟 Si el controlador envió los mensajes directamente → no devolvemos texto
-  // ======================================================
   if (respuesta === null) return null;
 
   return respuesta || "¿En qué puedo ayudarte ahora?";
