@@ -1,21 +1,16 @@
 // /bot/services/propiedadesService.js
 // -------------------------------------------------------
-// FASE 5.7 — Servicio de Propiedades (C2-C FINAL)
+// SERVICIO DE PROPIEDADES — Ajustado 100% a tu BD real
 // -------------------------------------------------------
-// • Búsqueda exacta + ranking semántico ligero
-// • Coincidencias por zona, título y tipo
-// • Compatible con IntentClassifier 5.7
-// • Limpieza estricta de filtros
-// • Sugeridas realistas (misma zona/tipo)
-// • Optimizado para MySQL
+// • El tipo se detecta ÚNICAMENTE por la columna TITLE
+// • No usa tabla "tipos"
+// • Filtros limpios y compatibles con IntentClassifier 5.7
 // -------------------------------------------------------
 
 import db from "../config/db.js";
 import { logError } from "../utils/log.js";
 
-// -------------------------------------------------------
-// Normalizador para coincidencias suaves
-// -------------------------------------------------------
+// Normalización para búsquedas suaves
 function normalize(str = "") {
   return str
     .toString()
@@ -26,64 +21,22 @@ function normalize(str = "") {
 }
 
 // -------------------------------------------------------
-// 📌 Ranking Semántico Suave (C2-C)
-// -------------------------------------------------------
-// A mayor score, más relevante para el usuario
-function rankProperty(p, filtros, semanticPrefs = {}) {
-  let score = 0;
-  const title = normalize(p.title);
-  const loc = normalize(p.location);
-
-  // 1) Coincidencia por distritos
-  if (Array.isArray(filtros.distritos)) {
-    for (const d of filtros.distritos) {
-      const nd = normalize(d);
-      if (loc.includes(nd)) score += 3;  // FUERTE (zona)
-      if (title.includes(nd)) score += 2;
-    }
-  }
-
-  // 2) Coincidencia por tipo (casa / depa / terreno)
-  if (filtros.tipo) {
-    const t = normalize(filtros.tipo);
-    if (title.includes(t)) score += 2;
-  }
-
-  // 3) Preferencias semánticas opcionales
-  if (semanticPrefs?.preferBedrooms && p.bedrooms >= semanticPrefs.preferBedrooms) {
-    score += 1;
-  }
-  if (semanticPrefs?.preferArea && p.area >= semanticPrefs.preferArea) {
-    score += 1;
-  }
-
-  // 4) Precio relativo
-  if (semanticPrefs?.budget) {
-    const diff = Math.abs((Number(p.price) || 0) - semanticPrefs.budget);
-    if (diff < 10000) score += 1;
-    if (diff < 5000) score += 1;
-  }
-
-  return score;
-}
-
-// -------------------------------------------------------
-// 🔍 BÚSQUEDA PRINCIPAL C2-C
+// 🔍 BÚSQUEDA PRINCIPAL
 // -------------------------------------------------------
 export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
   try {
     let sql = `
       SELECT 
         id, title, price, location, bedrooms, bathrooms, cocheras, area,
-        image, description, distribution, created_at
+        image, description, distribution
       FROM properties
       WHERE 1 = 1
     `;
     const params = [];
 
-    // ---------------------------------------------------
-    // Filtro: distritos
-    // ---------------------------------------------------
+    // -------------------------------------------
+    // FILTRO: DISTRITOS
+    // -------------------------------------------
     if (Array.isArray(filtros.distritos) && filtros.distritos.length > 0) {
       sql += ` AND (`;
       filtros.distritos.forEach((d, i) => {
@@ -94,69 +47,61 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
       sql += `)`;
     }
 
-    // ---------------------------------------------------
-    // Filtro: tipo
-    // ---------------------------------------------------
+    // -------------------------------------------
+    // FILTRO: TIPO (detectado desde TITLE)
+    // -------------------------------------------
     if (filtros.tipo) {
       sql += ` AND LOWER(title) LIKE ?`;
       params.push(`%${normalize(filtros.tipo)}%`);
     }
 
-    // ---------------------------------------------------
-    // Filtro: dormitorios
-    // ---------------------------------------------------
+    // -------------------------------------------
+    // FILTRO: DORMITORIOS
+    // -------------------------------------------
     if (filtros.bedrooms) {
       sql += ` AND bedrooms >= ?`;
       params.push(filtros.bedrooms);
     }
 
-    // ---------------------------------------------------
-    // Filtro: baños
-    // ---------------------------------------------------
+    // -------------------------------------------
+    // FILTRO: BAÑOS
+    // -------------------------------------------
     if (filtros.bathrooms) {
       sql += ` AND bathrooms >= ?`;
       params.push(filtros.bathrooms);
     }
 
-    // ---------------------------------------------------
-    // Filtro: cocheras
-    // ---------------------------------------------------
+    // -------------------------------------------
+    // FILTRO: COCHERAS
+    // -------------------------------------------
     if (filtros.cocheras) {
       sql += ` AND cocheras >= ?`;
       params.push(filtros.cocheras);
     }
 
-    // ---------------------------------------------------
-    // Filtro: precio
-    // ---------------------------------------------------
+    // -------------------------------------------
+    // FILTRO: PRECIO MÍNIMO
+    // -------------------------------------------
     if (filtros.precio_min) {
       sql += ` AND price >= ?`;
       params.push(filtros.precio_min);
     }
 
+    // -------------------------------------------
+    // FILTRO: PRECIO MÁXIMO
+    // -------------------------------------------
     if (filtros.precio_max) {
       sql += ` AND price <= ?`;
       params.push(filtros.precio_max);
     }
 
-    // Ordenamiento inicial (antes de ranking)
+    // -------------------------------------------
+    // ORDENAMIENTO
+    // -------------------------------------------
     sql += ` ORDER BY created_at DESC`;
 
-    // Ejecutar SQL
     const [rows] = await db.execute(sql, params);
-    if (!rows || rows.length === 0) return [];
-
-    // ---------------------------------------------------
-    // 🔥 RANKING SEMÁNTICO (C2-C)
-    // ---------------------------------------------------
-    const ranked = rows
-      .map(r => ({
-        ...r,
-        _score: rankProperty(r, filtros, semanticPrefs)
-      }))
-      .sort((a, b) => b._score - a._score);
-
-    return ranked;
+    return rows || [];
 
   } catch (err) {
     logError("Error en buscarPropiedades()", err);
@@ -165,7 +110,7 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
 }
 
 // -------------------------------------------------------
-// ✨ PROPIEDADES SUGERIDAS (fallback)
+// ✨ BUSCAR SUGERIDAS (basado solo en title y location)
 // -------------------------------------------------------
 export async function buscarSugeridas(filtros = {}) {
   try {
@@ -178,7 +123,7 @@ export async function buscarSugeridas(filtros = {}) {
     `;
     const params = [];
 
-    // Basado en zona si existe
+    // Sugerir por distrito
     if (Array.isArray(filtros.distritos) && filtros.distritos.length > 0) {
       sql += ` AND (`;
       filtros.distritos.forEach((d, i) => {
@@ -189,7 +134,7 @@ export async function buscarSugeridas(filtros = {}) {
       sql += `)`;
     }
 
-    // Basado en tipo si existe
+    // Si hay tipo, sugerir por más coincidencias de título
     if (filtros.tipo) {
       sql += ` AND LOWER(title) LIKE ?`;
       params.push(`%${normalize(filtros.tipo)}%`);
