@@ -1,91 +1,103 @@
 // /bot/services/propiedadesService.js
 // -------------------------------------------------------
-// Filtros → SQL dinámico inteligente
-// Versión premium compatible con filtros avanzados.
+// Motor de búsqueda estricto FASE 5.5
+// No mezcla tipos, respeta precios exactos,
+// valida zonas reales y evita respuestas absurdas.
 // -------------------------------------------------------
 
 import { pool } from "../../db.js";
 import { logError } from "../utils/log.js";
+
+// LIMPIAR STRINGS PARA SQL SEGURO
+function clean(str = "") {
+  return str
+    .replace(/['"]/g, "")        // evitar comillas peligrosas
+    .replace(/\s+/g, " ")        // normalizar espacios
+    .trim();
+}
 
 export async function buscarPropiedades(filtros = {}) {
   try {
     let query = `
       SELECT *
       FROM properties
-      WHERE 1=1
+      WHERE 1 = 1
     `;
 
-    // ================================
-    // STATUS (venta / alquiler)
-    // ================================
+    // ============================================
+    // STATUS
+    // ============================================
     if (filtros.status) {
-      query += ` AND status LIKE '%${filtros.status}%'`;
+      const st = clean(filtros.status);
+      query += ` AND status LIKE '%${st}%'`;
     }
 
-    // ================================
-    // DISTRITOS / ZONAS
-    // ================================
+    // ============================================
+    // DISTRITOS — Solo coincidencias REALES
+    // ============================================
     if (filtros.distritos?.length > 0) {
       const parts = filtros.distritos
-        .map((d) => `location LIKE '%${d}%'`)
+        .map((d) => `location LIKE '%${clean(d)}%'`)
         .join(" OR ");
+
       query += ` AND (${parts})`;
     }
 
-    // ================================
-    // TIPO DE PROPIEDAD
-    // ================================
+    // ============================================
+    // TIPO — ESTRICTO
+    // ============================================
     if (filtros.tipo) {
-      const tipo = filtros.tipo.toUpperCase();
-      query += ` AND UPPER(title) LIKE '%${tipo}%'`;
+      const tipo = clean(filtros.tipo).toLowerCase();
+
+      // Coincidencia estricta solo si aparece como palabra
+      query += ` AND LOWER(title) REGEXP '(\\\\b${tipo}\\\\b)'`;
     }
 
-    // ================================
-    // BEDROOMS
-    // ================================
+    // ============================================
+    // DORMITORIOS
+    // ============================================
     if (!isNaN(filtros.bedrooms) && filtros.bedrooms > 0) {
       query += ` AND bedrooms >= ${Number(filtros.bedrooms)}`;
     }
 
-    // ================================
-    // BATHROOMS
-    // ================================
+    // ============================================
+    // BAÑOS
+    // ============================================
     if (!isNaN(filtros.bathrooms) && filtros.bathrooms > 0) {
       query += ` AND bathrooms >= ${Number(filtros.bathrooms)}`;
     }
 
-    // ================================
+    // ============================================
     // COCHERAS
-    // ================================
+    // ============================================
     if (!isNaN(filtros.cocheras) && filtros.cocheras > 0) {
       query += ` AND cocheras >= ${Number(filtros.cocheras)}`;
     }
 
-    // ================================
-    // ÁREA mínima (m2)
-    // ================================
+    // ============================================
+    // ÁREA mínima
+    // ============================================
     if (!isNaN(filtros.area_min) && filtros.area_min > 0) {
       query += ` AND area >= ${Number(filtros.area_min)}`;
     }
 
-    // ================================
+    // ============================================
     // PRECIO mínimo
-    // ================================
+    // ============================================
     if (!isNaN(filtros.precio_min) && filtros.precio_min > 0) {
       query += ` AND price >= ${Number(filtros.precio_min)}`;
     }
 
-    // ================================
+    // ============================================
     // PRECIO máximo
-    // ================================
+    // ============================================
     if (!isNaN(filtros.precio_max) && filtros.precio_max > 0) {
       query += ` AND price <= ${Number(filtros.precio_max)}`;
     }
 
-    // ================================
-    // EXTRAS (opcional)
-    // Aplica si tu BD tiene columnas booleanas o etiquetas
-    // ================================
+    // ============================================
+    // FILTROS EXTRA
+    // ============================================
     if (filtros.extras?.length > 0) {
       filtros.extras.forEach((extra) => {
         switch (extra) {
@@ -104,32 +116,17 @@ export async function buscarPropiedades(filtros = {}) {
           case "estreno":
             query += ` AND (description LIKE '%estreno%' OR title LIKE '%estreno%')`;
             break;
-          case "remodelado":
-            query += ` AND (description LIKE '%remodel%' OR title LIKE '%remodel%')`;
-            break;
-          case "amoblado":
-            query += ` AND (description LIKE '%amoblad%' OR title LIKE '%amoblad%')`;
-            break;
-          case "piscina":
-            query += ` AND (description LIKE '%piscina%' OR title LIKE '%piscina%')`;
-            break;
-          case "jardin":
-            query += ` AND (description LIKE '%jardin%' OR description LIKE '%jardín%')`;
-            break;
-          case "patio":
-            query += ` AND (description LIKE '%patio%')`;
-            break;
         }
       });
     }
 
-    // ================================
-    // ORDENAMIENTO inteligente
-    // ================================
+    // ============================================
+    // ORDENAMIENTO: 1) Coincidencia exacta 2) Recientes
+    // ============================================
     query += `
-      ORDER BY 
-        (price >= 1) DESC,
-        created_at DESC
+      ORDER BY
+        created_at DESC,
+        price ASC
     `;
 
     const [rows] = await pool.query(query);
@@ -141,14 +138,14 @@ export async function buscarPropiedades(filtros = {}) {
 }
 
 // ========================================================
-// PROPIEDADES SUGERIDAS (fallback premium)
+// PROPIEDADES SUGERIDAS — SOLO SI NO HAY RESULTADOS
 // ========================================================
-export async function buscarSugeridas() {
+export async function buscarSugeridas(filtros = {}) {
   try {
     const [rows] = await pool.query(`
-      SELECT * 
-      FROM properties 
-      ORDER BY RAND() 
+      SELECT *
+      FROM properties
+      ORDER BY RAND()
       LIMIT 6
     `);
     return rows;
