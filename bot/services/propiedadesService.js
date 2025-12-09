@@ -1,18 +1,17 @@
 // /bot/services/propiedadesService.js
 // -------------------------------------------------------
-// FASE 5.7 — Servicio de Propiedades (C3 FINAL)
+// FASE 5.7 — Servicio de Propiedades (D Final)
 // -------------------------------------------------------
-// • Búsqueda exacta + coincidencia inteligente por TITLE
-// • Tabla 'tipos' NO se usa (todo viene desde title)
-// • Mejor detección de tipo: casa, depa, departamento,
-//   terreno, lote, local, oficina, comercial.
-// • Limpieza estricta de filtros
+// • Búsqueda exacta + semántica ligera
+// • Filtro TIPO 100% basado en title
+// • No usa la tabla "tipos"
+// • Mejor coincidencia: casa | departamento | terreno | local
 // -------------------------------------------------------
 
 import db from "../config/db.js";
 import { logError } from "../utils/log.js";
 
-// Normaliza texto
+// Normaliza texto para coincidencias suaves
 function normalize(str = "") {
   return str
     .toString()
@@ -37,7 +36,7 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
     const params = [];
 
     // ------------------------------
-    // FILTRO DISTRITOS
+    // DISTRITOS
     // ------------------------------
     if (Array.isArray(filtros.distritos) && filtros.distritos.length > 0) {
       sql += ` AND (`;
@@ -50,34 +49,36 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
     }
 
     // ------------------------------
-    // FILTRO TIPO (desde TITLE)
+    // TIPO (casa, departamento, local, terreno)
+    // Solo desde title
     // ------------------------------
     if (filtros.tipo) {
       const t = normalize(filtros.tipo);
 
-      if (["casa"].includes(t)) {
-        sql += ` AND (LOWER(title) LIKE '%casa%')`;
-      }
+      const patterns = [];
 
-      if (["departamento", "depa", "dpto"].includes(t)) {
-        sql += ` AND (LOWER(title) LIKE '%depa%' OR LOWER(title) LIKE '%departamento%')`;
-      }
+      if (t.includes("casa")) patterns.push("%casa%");
+      if (t.includes("depart")) patterns.push("%depa%", "%depart%");
+      if (t.includes("local")) patterns.push("%local%");
+      if (t.includes("terreno") || t.includes("lote"))
+        patterns.push("%terreno%", "%lote%");
 
-      if (["terreno", "lote"].includes(t)) {
-        sql += ` AND (LOWER(title) LIKE '%terreno%' OR LOWER(title) LIKE '%lote%')`;
-      }
-
-      if (["local", "local comercial", "comercial"].includes(t)) {
-        sql += ` AND (LOWER(title) LIKE '%local%' OR LOWER(title) LIKE '%comerc%')`;
-      }
-
-      if (["oficina"].includes(t)) {
-        sql += ` AND LOWER(title) LIKE '%oficina%'`;
+      if (patterns.length > 0) {
+        sql += " AND (";
+        patterns.forEach((p, i) => {
+          sql += "LOWER(title) LIKE ?";
+          params.push(p);
+          if (i < patterns.length - 1) sql += " OR ";
+        });
+        sql += ")";
+      } else {
+        sql += " AND LOWER(title) LIKE ?";
+        params.push(`%${t}%`);
       }
     }
 
     // ------------------------------
-    // FILTROS NUMÉRICOS
+    // RESTO DE FILTROS
     // ------------------------------
     if (filtros.bedrooms) {
       sql += ` AND bedrooms >= ?`;
@@ -104,9 +105,6 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
       params.push(filtros.precio_max);
     }
 
-    // ------------------------------
-    // ORDEN
-    // ------------------------------
     sql += ` ORDER BY created_at DESC`;
 
     const [rows] = await db.execute(sql, params);
@@ -119,7 +117,7 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
 }
 
 // -------------------------------------------------------
-// ✨ PROPIEDADES SUGERIDAS (C3 FINAL)
+// ✨ PROPIEDADES SUGERIDAS
 // -------------------------------------------------------
 export async function buscarSugeridas(filtros = {}) {
   try {
@@ -143,14 +141,10 @@ export async function buscarSugeridas(filtros = {}) {
       sql += `)`;
     }
 
-    // Sugerencias por tipo (desde TITLE)
+    // Sugerencias por tipo basado en title
     if (filtros.tipo) {
-      const t = normalize(filtros.tipo);
-
-      if (t.includes("casa")) sql += ` AND LOWER(title) LIKE '%casa%'`;
-      if (t.includes("depa")) sql += ` AND (LOWER(title) LIKE '%depa%' OR LOWER(title) LIKE '%departamento%')`;
-      if (t.includes("terreno")) sql += ` AND (LOWER(title) LIKE '%terreno%' OR LOWER(title) LIKE '%lote%')`;
-      if (t.includes("local")) sql += ` AND (LOWER(title) LIKE '%local%' OR LOWER(title) LIKE '%comerc%')`;
+      sql += ` AND LOWER(title) LIKE ?`;
+      params.push(`%${normalize(filtros.tipo)}%`);
     }
 
     sql += ` ORDER BY RAND() LIMIT 6`;
