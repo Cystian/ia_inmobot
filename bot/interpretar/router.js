@@ -1,11 +1,11 @@
 // /bot/interpretar/router.js
 // -------------------------------------------------------
-// Router oficial FASE 5.7
-// ● Maneja leads de Facebook
-// ● Saludo único por sesión
-// ● Follow-up inteligente
-// ● Inversión integrada
-// ● Zero loops
+// Router oficial FASE 5.7 (Estable)
+// -------------------------------------------------------
+// – Evita respuestas duplicadas
+// – Respeta prioridad: detalle > búsqueda > inversión > ayuda
+// – Follow-up limpio (sin loops)
+// – No responde “¿En qué puedo ayudarte?” fuera de contexto
 // -------------------------------------------------------
 
 import propiedadesController from "../controllers/propiedadesController.js";
@@ -18,58 +18,55 @@ import { MENSAJES } from "../utils/messages.js";
 export async function routeIntent(intencion, filtros, contexto = {}) {
   const { esFollowUp, session = {} } = contexto;
 
-  // ==============================================
-  // 0️⃣ LEAD DE FACEBOOK (alta prioridad)
-  // ==============================================
+  // ======================================================
+  // 0️⃣ LEAD DE META (máxima prioridad)
+  // ======================================================
   if (intencion === "lead_meta" || session.isLead) {
-    return (
-      "Gracias por tu interés 👍\n" +
-      "Voy a analizar tus datos y prepararte opciones ideales según tu presupuesto.\n\n" +
-      "¿Tienes alguna zona de preferencia?"
-    );
+    return MENSAJES.lead_detectado;
   }
 
-  // ==============================================
-  // 1️⃣ FOLLOW-UP INTELIGENTE
-  // ==============================================
+  // ======================================================
+  // 1️⃣ FOLLOW-UP REAL
+  // ======================================================
   if (esFollowUp) {
-    const prev = session.lastIntent || "buscar_propiedades";
+    const prev = session.lastIntent;
 
-    switch (prev) {
-      case "buscar_propiedades":
-        return propiedadesController.buscar(filtros, {
-          ...contexto,
-          esFollowUp: true
-        });
-
-      case "pregunta_propiedad":
-        return detallePropiedadController.responder(contexto);
-
-      case "inversion":
-        return inversionController.recomendar(filtros, {
-          ...contexto,
-          esFollowUp: true
-        });
-
-      default:
-        return ayudaController.generica(contexto);
+    // — FOLLOW-UP DE RESULTADOS
+    if (prev === "buscar_propiedades") {
+      return propiedadesController.buscar(filtros, {
+        ...contexto,
+        esFollowUp: true
+      });
     }
+
+    // — FOLLOW-UP DE DETALLE
+    if (prev === "pregunta_propiedad") {
+      return detallePropiedadController.responder(contexto);
+    }
+
+    // — FOLLOW-UP DE INVERSIÓN
+    if (prev === "inversion") {
+      return inversionController.recomendar(filtros, {
+        ...contexto,
+        esFollowUp: true
+      });
+    }
+
+    // Caso residual: ayuda
+    return ayudaController.generica(contexto);
   }
 
-  // ==============================================
+  // ======================================================
   // 2️⃣ INTENCIONES PRINCIPALES
-  // ==============================================
+  // ======================================================
   switch (intencion) {
-    case "buscar_propiedades":
-      return propiedadesController.buscar(filtros, contexto);
-
     case "saludo":
     case "saludo_simple":
-      if (session.hasGreeted) {
-        // Ya saludamos en esta sesión → no repetir
-        return null;
-      }
+      if (session.hasGreeted) return null;
       return saludoController.saludar();
+
+    case "buscar_propiedades":
+      return propiedadesController.buscar(filtros, contexto);
 
     case "pregunta_propiedad":
       return detallePropiedadController.responder(contexto);
@@ -81,7 +78,6 @@ export async function routeIntent(intencion, filtros, contexto = {}) {
       return MENSAJES.despedida;
 
     default:
-      // 3️⃣ Fallback corporativo cuando la intención es “otro”
       return ayudaController.generica(contexto);
   }
 }
