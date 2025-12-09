@@ -1,7 +1,7 @@
-// //db.js
+// /bot/config/db.js
 import mysql from "mysql2/promise";
 
-export const pool = mysql.createPool({
+const db = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASS,
@@ -9,3 +9,5 @@ export const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10
 });
+
+export default db;
