@@ -1,26 +1,20 @@
 // /bot/interpretar/contextManager.js
 // -------------------------------------------------------
-// Maneja memoria conversacional por número de teléfono.
-// Guarda filtros, propiedades, página, etc.
+// Memoria conversacional por usuario (versión FASE 5.6 / FASE 6 Ready)
+// - Saludo único por sesión
+// - Memoria de último lead detectado
+// - Anti-loop de saludo
+// - Propiedad referida
+// - Estado de búsqueda y follow-up
 // -------------------------------------------------------
 
-const sessionStore = {}; 
-// Estructura:
-// sessionStore[userPhone] = {
-//   lastIntent,
-//   lastFilters,
-//   lastProperties,
-//   lastPage,
-//   lastSelectedProperty,
-//   lastMessage,
-//   timestamp
-// }
+const sessionStore = {};
 
-// Tiempo máximo antes de limpiar sesión (30 min)
+// Tiempo máximo de inactividad (30 min)
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
 // -------------------------------------------------------
-// Limpia sesión si tiene más de 30 minutos de inactividad
+// Detecta expiración de sesión
 // -------------------------------------------------------
 function isSessionExpired(session) {
   if (!session?.timestamp) return true;
@@ -28,30 +22,41 @@ function isSessionExpired(session) {
 }
 
 // -------------------------------------------------------
-// Obtener sesión de un usuario (crea si no existe)
+// Crear sesión nueva limpia
+// -------------------------------------------------------
+function createNewSession() {
+  return {
+    lastIntent: null,
+    lastFilters: {},
+    lastProperties: [],
+    lastPage: 1,
+    lastSelectedProperty: null,
+    lastMessage: "",
+    hasGreeted: false,          // 👈 Saludo único por sesión
+    lastLeadData: null,         // 👈 Registro de leads de Meta Ads
+    antiSaludoLoop: false,      // 👈 Evita que responda "Hola" varias veces
+    timestamp: Date.now()
+  };
+}
+
+// -------------------------------------------------------
+// Obtener sesión actual
 // -------------------------------------------------------
 export function getSession(userPhone) {
   if (!userPhone) return {};
 
   const session = sessionStore[userPhone];
 
+  // Si no existe o expiró → nueva sesión
   if (!session || isSessionExpired(session)) {
-    sessionStore[userPhone] = {
-      lastIntent: null,
-      lastFilters: {},
-      lastProperties: [],
-      lastPage: 1,
-      lastSelectedProperty: null,
-      lastMessage: "",
-      timestamp: Date.now()
-    };
+    sessionStore[userPhone] = createNewSession();
   }
 
   return sessionStore[userPhone];
 }
 
 // -------------------------------------------------------
-// Actualizar solo campos necesarios
+// Actualizar campos específicos sin perder los anteriores
 // -------------------------------------------------------
 export function updateSession(userPhone, data = {}) {
   if (!userPhone) return;
@@ -66,7 +71,7 @@ export function updateSession(userPhone, data = {}) {
 }
 
 // -------------------------------------------------------
-// Resetear sesión manualmente (opcional)
+// Reset manual
 // -------------------------------------------------------
 export function resetSession(userPhone) {
   if (sessionStore[userPhone]) {
