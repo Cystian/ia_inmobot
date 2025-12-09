@@ -1,11 +1,13 @@
 // /bot/interpretar/intentClassifier.js
 // -------------------------------------------------------
-// Clasificador de intención Groq — FASE 5.7
+// Clasificador de intención Groq — FASE 5.7 FINAL
 // -------------------------------------------------------
 // – Corrige respuestas fuera de contexto
-// – Evita análisis innecesarios tipo "Estoy buscando..."
+// – Evita textos interpretativos ("estoy buscando...")
 // – Follow-up más inteligente
-// – Detección más fuerte de referencia a propiedad
+// – Detección reforzada de referencia a propiedad
+// – No inventa zonas
+// – JSON blindado
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -38,16 +40,16 @@ const FRASES_FOLLOW_UP = [
   "algo mas","algo más","siguiente","otra parecida"
 ];
 
-// 🔹 Detección fuerte de referencia a propiedad ya mostrada
+// 🔹 Detección fuerte de referencia a propiedad
 const PROPERTY_REF_WORDS = [
-  "esa","ese","esta casa","esa casa","esa propiedad","ese depa","ese departamento",
+  "esa","ese","esta casa","esa casa","esa propiedad",
+  "ese depa","ese departamento","esa vivienda",
   "la primera","la 1","la segunda","la 2","la tercera","la 3",
-  "me puedes dar mas detalles","me puedes dar más detalles",
-  "dame mas detalles","dame más detalles",
-  "quiero saber mas","quiero saber más","quiero más detalles"
+  "me puedes dar mas detalles","más detalles","mas detalles",
+  "quiero saber mas","quiero más detalles"
 ];
 
-// 🔹 Zonas válidas (anticolapso IA)
+// 🔹 Zonas válidas
 const ZONAS_VALIDAS = [
   "nuevo chimbote","chimbote","buenos aires",
   "bellamar","villa maria","la caleta","casma"
@@ -88,7 +90,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 2️⃣ Intención de inversión (inmediata, sin Groq)
+  // 2️⃣ Intención de inversión
   // ======================================================
   if (KW_INVERSION.some(k => text.includes(k))) {
     return {
@@ -116,7 +118,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 4️⃣ Follow-Up (más opciones, más barato, etc.)
+  // 4️⃣ Follow-up (más opciones, más barato)
   // ======================================================
   const esFollowUp = FRASES_FOLLOW_UP.some(f => text.includes(f));
 
@@ -144,9 +146,10 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   // ======================================================
   const prompt = `
 Eres un asistente inmobiliario profesional.
-NO inventes zonas o distritos.
-NO armes textos interpretativos como "Estoy buscando...".
-Devuelve EXCLUSIVAMENTE JSON válido.
+NO inventes zonas.
+NO inventes distritos.
+NO generes frases interpretativas ("estoy buscando...").
+Responde en JSON válido únicamente.
 
 Mensaje: "${raw}"
 
@@ -174,7 +177,7 @@ Formato:
       model: "llama-3.3-70b-versatile",
       temperature: 0.2,
       messages: [
-        { role: "system", content: "Responde SOLO JSON válido." },
+        { role: "system", content: "Responde SOLO JSON válido y limpio." },
         { role: "user", content: prompt }
       ]
     });
@@ -196,21 +199,21 @@ Formato:
       };
     }
 
-    let filtrosBase = ia.filtros || {};
+    let filtrosBase = ia.filtros;
     let intencion = ia.intencion || (contieneIntencion ? "buscar_propiedades" : "otro");
     let iaRespuesta = ia.respuesta || "";
 
     // ======================================================
-    // 6️⃣ Filtro estricto de zonas válidas
+    // 6️⃣ Filtrar zonas inválidas
     // ======================================================
     if (Array.isArray(filtrosBase.distritos)) {
       filtrosBase.distritos = filtrosBase.distritos.filter(d =>
-        ZONAS_VALIDAS.includes(String(d).toLowerCase())
+        ZONAS_VALIDAS.includes(d.toLowerCase())
       );
     }
 
     // ======================================================
-    // 7️⃣ Ajustes finales de mensajes
+    // 7️⃣ Ajustes finales
     // ======================================================
     if (intencion === "saludo") iaRespuesta = MENSAJES.saludo_inicial;
     if (intencion === "despedida") iaRespuesta = MENSAJES.despedida;
