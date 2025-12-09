@@ -3,10 +3,9 @@
 // Clasificador de intención Groq — FASE 5.7
 // -------------------------------------------------------
 // – Corrige respuestas fuera de contexto
-// – Evita textos interpretativos tipo "Estoy buscando..."
-// – Follow-up más preciso
-// – Detección reforzada de referencia a propiedad
-// – Anticontaminación de zonas inventadas
+// – Evita análisis innecesarios tipo "Estoy buscando..."
+// – Follow-up más inteligente
+// – Detección más fuerte de referencia a propiedad
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -18,7 +17,7 @@ import { extractFollowUpFilters } from "./entityExtractorFollowUp.js";
 const client = new Groq({ apiKey: GROQ_API_KEY });
 
 // -------------------------------------------------------
-// 🔹 Control de palabras
+// 🔹 Listas de control
 // -------------------------------------------------------
 
 const SALUDOS_PUROS = [
@@ -39,21 +38,22 @@ const FRASES_FOLLOW_UP = [
   "algo mas","algo más","siguiente","otra parecida"
 ];
 
-// 🔹 Referencias fuertes a propiedades
+// 🔹 Detección fuerte de referencia a propiedad ya mostrada
 const PROPERTY_REF_WORDS = [
-  "esa","ese","esa casa","esa propiedad","ese depa","ese departamento",
+  "esa","ese","esta casa","esa casa","esa propiedad","ese depa","ese departamento",
   "la primera","la 1","la segunda","la 2","la tercera","la 3",
-  "me puedes dar mas detalles","dame mas detalles",
-  "quiero saber mas","quiero más detalles","ver esa"
+  "me puedes dar mas detalles","me puedes dar más detalles",
+  "dame mas detalles","dame más detalles",
+  "quiero saber mas","quiero saber más","quiero más detalles"
 ];
 
-// 🔹 Zonas válidas
+// 🔹 Zonas válidas (anticolapso IA)
 const ZONAS_VALIDAS = [
   "nuevo chimbote","chimbote","buenos aires",
   "bellamar","villa maria","la caleta","casma"
 ];
 
-// 🔹 Inversión
+// 🔹 Palabras clave de inversión
 const KW_INVERSION = [
   "invertir","inversion","inversión","negocio","rentable",
   "retorno","ganancia","revalor","crezca","aprovechar"
@@ -74,9 +74,9 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     Array.isArray(session.lastProperties) &&
     session.lastProperties.length > 0;
 
-  // ------------------------------------------------------
+  // ======================================================
   // 1️⃣ Saludo único por sesión
-  // ------------------------------------------------------
+  // ======================================================
   if (esSaludoSimple && !contieneIntencion && !session.hasGreeted) {
     return {
       intencion: "saludo_simple",
@@ -87,9 +87,9 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     };
   }
 
-  // ------------------------------------------------------
-  // 2️⃣ Intención de inversión
-  // ------------------------------------------------------
+  // ======================================================
+  // 2️⃣ Intención de inversión (inmediata, sin Groq)
+  // ======================================================
   if (KW_INVERSION.some(k => text.includes(k))) {
     return {
       intencion: "inversion",
@@ -100,9 +100,9 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     };
   }
 
-  // ------------------------------------------------------
-  // 3️⃣ Referencia explícita a una propiedad mostrada
-  // ------------------------------------------------------
+  // ======================================================
+  // 3️⃣ Referencia fuerte a propiedad previa
+  // ======================================================
   const refiereAPropiedad = PROPERTY_REF_WORDS.some(w => text.includes(w));
 
   if (tieneSesionPrevia && refiereAPropiedad) {
@@ -115,16 +115,19 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     };
   }
 
-  // ------------------------------------------------------
-  // 4️⃣ Follow-up (más barato, más opciones…)
-  // ------------------------------------------------------
+  // ======================================================
+  // 4️⃣ Follow-Up (más opciones, más barato, etc.)
+  // ======================================================
   const esFollowUp = FRASES_FOLLOW_UP.some(f => text.includes(f));
 
   if (tieneSesionPrevia && esFollowUp) {
+    const filtrosPrevios = session.lastFilters || {};
+    const propiedadesPrevias = session.lastProperties || [];
+
     const refinados = extractFollowUpFilters(
       text,
-      session.lastFilters || {},
-      session.lastProperties || []
+      filtrosPrevios,
+      propiedadesPrevias
     );
 
     return {
@@ -136,14 +139,14 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     };
   }
 
-  // ------------------------------------------------------
-  // 5️⃣ Llamada a Groq — Clasificación principal
-  // ------------------------------------------------------
+  // ======================================================
+  // 5️⃣ Groq — Clasificación principal
+  // ======================================================
   const prompt = `
 Eres un asistente inmobiliario profesional.
 NO inventes zonas o distritos.
-NO generes explicaciones como "Estoy buscando...".
-Responde exclusivamente JSON válido.
+NO armes textos interpretativos como "Estoy buscando...".
+Devuelve EXCLUSIVAMENTE JSON válido.
 
 Mensaje: "${raw}"
 
@@ -169,17 +172,15 @@ Formato:
   try {
     const completion = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
-      temperature: 0.15,
+      temperature: 0.2,
       messages: [
         { role: "system", content: "Responde SOLO JSON válido." },
         { role: "user", content: prompt }
       ]
     });
 
-    let content = (completion?.choices?.[0]?.message?.content || "")
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
+    let content = completion?.choices?.[0]?.message?.content || "";
+    content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
 
     let ia = {};
     try {
@@ -195,22 +196,22 @@ Formato:
       };
     }
 
-    let filtrosBase = ia.filtros;
+    let filtrosBase = ia.filtros || {};
     let intencion = ia.intencion || (contieneIntencion ? "buscar_propiedades" : "otro");
     let iaRespuesta = ia.respuesta || "";
 
-    // ------------------------------------------------------
+    // ======================================================
     // 6️⃣ Filtro estricto de zonas válidas
-    // ------------------------------------------------------
+    // ======================================================
     if (Array.isArray(filtrosBase.distritos)) {
       filtrosBase.distritos = filtrosBase.distritos.filter(d =>
-        ZONAS_VALIDAS.includes(d.toLowerCase())
+        ZONAS_VALIDAS.includes(String(d).toLowerCase())
       );
     }
 
-    // ------------------------------------------------------
-    // 7️⃣ Ajustes finales
-    // ------------------------------------------------------
+    // ======================================================
+    // 7️⃣ Ajustes finales de mensajes
+    // ======================================================
     if (intencion === "saludo") iaRespuesta = MENSAJES.saludo_inicial;
     if (intencion === "despedida") iaRespuesta = MENSAJES.despedida;
 
