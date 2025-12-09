@@ -1,11 +1,11 @@
 // /bot/interpretar/intentClassifier.js
 // -------------------------------------------------------
-// Clasificador de intención con IA + reglas avanzadas.
-// Maneja:
-// - saludos puros
-// - búsqueda de propiedades
-// - follow-up avanzado (más barato, más opciones, etc.)
-// - preguntas sobre una propiedad ya mostrada (Property Memory)
+// Clasificador de intención Groq optimizado FASE 5.5
+// - Nunca inventa distritos ni zonas
+// - Filtros estrictos tipo/precio
+// - Follow-up asistido real
+// - Saludo único por sesión
+// - Cero respuestas tipo “Lima / provincia”
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -16,111 +16,53 @@ import { extractFollowUpFilters } from "./entityExtractorFollowUp.js";
 
 const client = new Groq({ apiKey: GROQ_API_KEY });
 
-// Saludos sin intención comercial (solo palabra EXACTA)
+// -------------------------------------------------------
+// LISTAS CONTROLADAS
+// -------------------------------------------------------
+
 const SALUDOS_PUROS = [
-  "hola",
-  "buenas",
-  "buenos dias",
-  "buenas tardes",
-  "buenas noches",
-  "hey",
-  "holi",
-  "ola",
-  "👋"
+  "hola", "buenas", "buenos dias", "buenas tardes", "buenas noches",
+  "hey", "holi", "ola", "👋"
 ];
 
-// Palabras clave base del dominio inmobiliario
 const PALABRAS_INTENCION = [
-  "casa",
-  "departamento",
-  "depa",
-  "dpto",
-  "terreno",
-  "lote",
-  "local",
-  "oficina",
-  "comprar",
-  "alquilar",
-  "alquiler",
-  "venta",
-  "vender",
-  "rentar",
-  "renta",
-  "alquilo",
-  "vendo",
-  "busco",
-  "quiero",
-  "propiedad",
-  "inmueble"
+  "casa", "departamento", "depa", "dpto", "terreno", "lote",
+  "local", "oficina", "comprar", "venta", "alquiler", "alquilar",
+  "busco", "quiero", "propiedad", "inmueble", "ver propiedad"
 ];
 
-// Frases típicas de seguimiento / refinamiento
 const FRASES_FOLLOW_UP = [
-  "mas barato",
-  "más barato",
-  "mas economico",
-  "más economico",
-  "mas opciones",
-  "más opciones",
-  "otra opcion",
-  "otra opción",
-  "muestrame mas",
-  "muéstrame mas",
-  "muéstrame más",
-  "tienes otra",
-  "algo mas",
-  "algo más",
-  "solo en",
-  "con cochera",
-  "con cocheras",
-  "con patio",
-  "con jardin",
-  "con jardín",
-  "con balcon",
-  "con balcón",
-  "con piscina",
-  "mas grande",
-  "más grande",
-  "mas caro",
-  "más caro",
-  "algo mejor",
-  "otra similar",
-  "otra parecida"
+  "mas barato", "más barato", "mas economico", "más economico",
+  "mas opciones", "más opciones", "otra opcion", "otra opción",
+  "muestrame mas", "muéstrame más", "tienes otra", "otra similar",
+  "algo mas", "algo más", "siguiente", "otra parecida"
 ];
 
-// Palabras/frases que indican referencia a una propiedad ya mostrada
 const PROPERTY_REF_WORDS = [
-  "esa",
-  "esa propiedad",
-  "esa casa",
-  "ese depa",
-  "ese departamento",
-  "ese terreno",
-  "ese lote",
-  "la primera",
-  "la 1",
-  "la segunda",
-  "la 2",
-  "la tercera",
-  "la 3"
+  "esa", "esa propiedad", "esa casa", "ese depa", "ese departamento",
+  "ese terreno", "ese lote", "la primera", "la 1", "la segunda",
+  "la 2", "la tercera", "la 3", "ver esa"
 ];
 
 // -------------------------------------------------------
+// 🚀 FUNCIÓN PRINCIPAL
+// -------------------------------------------------------
 
-export async function getIaAnalysis(raw, msg, session = {}) {
-  const lower = msg.trim().toLowerCase();
+export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
+  const text = msgNormalizado.toLowerCase().trim();
 
-  const contieneIntencion = PALABRAS_INTENCION.some((p) => lower.includes(p));
-  const esSaludoSimple = SALUDOS_PUROS.includes(lower);
+  const contieneIntencion = PALABRAS_INTENCION.some(p => text.includes(p));
+  const esSaludoSimple = SALUDOS_PUROS.includes(text);
 
   const tieneSesionPrevia =
     !!session.lastIntent &&
-    (Array.isArray(session.lastProperties)
-      ? session.lastProperties.length > 0
-      : true);
+    Array.isArray(session.lastProperties) &&
+    session.lastProperties.length > 0;
 
-  // 🧠 1) Saludo puro sin intención inmobiliaria
-  if (esSaludoSimple && !contieneIntencion) {
+  // ======================================================
+  // 1️⃣ Saludo puro — pero solo si no saludó antes
+  // ======================================================
+  if (esSaludoSimple && !contieneIntencion && !session.hasGreeted) {
     return {
       intencion: "saludo_simple",
       filtrosBase: {},
@@ -130,10 +72,10 @@ export async function getIaAnalysis(raw, msg, session = {}) {
     };
   }
 
-  // 🧠 2) Pregunta sobre una propiedad mostrada antes ("esa propiedad")
-  const refiereAPropiedad = PROPERTY_REF_WORDS.some((w) =>
-    lower.includes(w)
-  );
+  // ======================================================
+  // 2️⃣ Referencia a propiedad ya mostrada
+  // ======================================================
+  const refiereAPropiedad = PROPERTY_REF_WORDS.some(w => text.includes(w));
 
   if (tieneSesionPrevia && refiereAPropiedad) {
     return {
@@ -145,35 +87,41 @@ export async function getIaAnalysis(raw, msg, session = {}) {
     };
   }
 
-  // 🧠 3) Follow-up avanzado / refinamiento
-  const esFollowUp = FRASES_FOLLOW_UP.some((f) => lower.includes(f));
+  // ======================================================
+  // 3️⃣ Follow-up (Fase 5.5 asistido)
+  // ======================================================
+  const esFollowUp = FRASES_FOLLOW_UP.some(f => text.includes(f));
 
   if (tieneSesionPrevia && esFollowUp) {
-    const lastFilters = session.lastFilters || {};
-    const lastProperties = session.lastProperties || [];
+    const filtrosPrevios = session.lastFilters || {};
+    const propiedadesPrevias = session.lastProperties || [];
 
-    const filtrosRefinados = extractFollowUpFilters(
-      lower,
-      lastFilters,
-      lastProperties
+    const refinados = extractFollowUpFilters(
+      text,
+      filtrosPrevios,
+      propiedadesPrevias
     );
 
     return {
       intencion: session.lastIntent || "buscar_propiedades",
-      filtrosBase: filtrosRefinados,
+      filtrosBase: refinados,
       iaRespuesta: "",
       esSaludoSimple: false,
       esFollowUp: true
     };
   }
 
-  // 🧠 4) IA Groq para búsquedas nuevas
+  // ======================================================
+  // 4️⃣ Groq (pero con RESTRICCIONES ALTAS)
+  // ======================================================
   const prompt = `
-Eres un asesor inmobiliario peruano MUY profesional.
-Devuelve SOLO JSON válido (sin backticks, sin markdown, sin texto extra).
+Eres un asistente inmobiliario.
+DEVUELVE SOLO JSON.
+NO inventes distritos.
+NO menciones Lima, Miraflores, San Isidro, Barranco ni zonas inexistentes.
+Si el usuario menciona una zona, respétala EXACTAMENTE como la escribió.
 
 Formato EXACTO:
-
 {
   "intencion": "buscar_propiedades|saludo|despedida|otro",
   "filtros": {
@@ -197,29 +145,22 @@ Mensaje del usuario: "${raw}"
   try {
     const completion = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
+      temperature: 0.2,
       messages: [
-        {
-          role: "system",
-          content:
-            "Eres un asesor inmobiliario. Devuelve SOLO JSON válido, sin ``` ni markdown."
-        },
+        { role: "system", content: "Responde SOLO JSON válido." },
         { role: "user", content: prompt }
       ]
     });
 
     let content = completion?.choices?.[0]?.message?.content || "";
-
-    content = content
-      .replace(/```json/gi, "")
-      .replace(/```/g, "")
-      .trim();
+    content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
 
     let ia = {};
 
     try {
       ia = JSON.parse(content);
     } catch (err) {
-      console.error("⚠ Error parseando JSON Groq:", content);
+      console.error("⚠ JSON inválido recibido de Groq:", content);
       ia = {};
     }
 
@@ -228,9 +169,14 @@ Mensaje del usuario: "${raw}"
       ia.intencion || (contieneIntencion ? "buscar_propiedades" : "otro");
     let iaRespuesta = ia.respuesta || "";
 
-    // Ajustar saludos y despedidas
+    // Corrección de saludos
     if (intencion === "saludo") iaRespuesta = MENSAJES.saludo_inicial;
     if (intencion === "despedida") iaRespuesta = MENSAJES.despedida;
+
+    // BLOQUEO FINAL: NO inventar distritos
+    if (Array.isArray(filtrosBase.distritos)) {
+      filtrosBase.distritos = filtrosBase.distritos.filter((d) => d.length <= 40);
+    }
 
     return {
       intencion,
@@ -239,16 +185,14 @@ Mensaje del usuario: "${raw}"
       esSaludoSimple: false,
       esFollowUp: false
     };
+
   } catch (error) {
     logError("Error en getIaAnalysis (Groq)", error);
 
-    // Fallback defensivo
     return {
       intencion: contieneIntencion ? "buscar_propiedades" : "otro",
       filtrosBase: {},
-      iaRespuesta: contieneIntencion
-        ? MENSAJES.intro_propiedades_default
-        : MENSAJES.error_general,
+      iaRespuesta: MENSAJES.error_general,
       esSaludoSimple: false,
       esFollowUp: false
     };
