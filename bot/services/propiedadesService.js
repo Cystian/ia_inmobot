@@ -1,22 +1,76 @@
 // /bot/services/propiedadesService.js
 // -------------------------------------------------------
-// Motor de búsqueda estricto FASE 5.5
-// No mezcla tipos, respeta precios exactos,
-// valida zonas reales y evita respuestas absurdas.
+// Motor de búsqueda FASE 5.6 (Profesional + Semántico)
+// -------------------------------------------------------
+// - Filtros estrictos
+// - Ordenamiento inteligente por relevancia
+// - Compatibilidad con preferencias semánticas
+// - Sugerencias basadas en zona + precio aproximado
 // -------------------------------------------------------
 
 import { pool } from "../../db.js";
 import { logError } from "../utils/log.js";
 
-// LIMPIAR STRINGS PARA SQL SEGURO
+// -------------------------------------------------------
+// Limpieza segura
+// -------------------------------------------------------
 function clean(str = "") {
-  return str
-    .replace(/['"]/g, "")        // evitar comillas peligrosas
-    .replace(/\s+/g, " ")        // normalizar espacios
+  return String(str)
+    .replace(/['"]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-export async function buscarPropiedades(filtros = {}) {
+// -------------------------------------------------------
+// RANKING SEMÁNTICO (fase 5.6)
+// -------------------------------------------------------
+function applySemanticRanking(rows, semanticPrefs = {}) {
+  return rows
+    .map((p) => {
+      let score = 0;
+
+      // -----------------------------------------
+      // Preferencias semánticas globales
+      // -----------------------------------------
+      if (semanticPrefs.moderno) {
+        if (/moderno|nuevo|minimalista/i.test(p.title + " " + p.description))
+          score += 15;
+      }
+
+      if (semanticPrefs.amplio) {
+        if (p.area >= 120) score += 10;
+      }
+
+      if (semanticPrefs.tranquilo) {
+        if (/parque|residencial|caleta|villa/i.test(p.location)) score += 12;
+      }
+
+      if (semanticPrefs.premium) {
+        if (p.price >= 150000) score += 20;
+      }
+
+      if (semanticPrefs.inversion) {
+        // terrenos + locales tienen peso alto
+        if (/terreno|lote|local/i.test(p.title)) score += 18;
+        if (p.price <= 70000) score += 12; // buena entrada para ROI alto
+      }
+
+      // -----------------------------------------
+      // BONUS: fotos + área + baños (calidad real)
+      // -----------------------------------------
+      if (p.image) score += 5;
+      if (p.bathrooms >= 2) score += 4;
+      if (p.bedrooms >= 3) score += 3;
+
+      return { ...p, score };
+    })
+    .sort((a, b) => b.score - a.score); // Mayor score primero
+}
+
+// -------------------------------------------------------
+// BUSCAR PROPIEDADES PRINCIPALES
+// -------------------------------------------------------
+export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
   try {
     let query = `
       SELECT *
@@ -33,7 +87,7 @@ export async function buscarPropiedades(filtros = {}) {
     }
 
     // ============================================
-    // DISTRITOS — Solo coincidencias REALES
+    // DISTRITOS — coincidencia estricta
     // ============================================
     if (filtros.distritos?.length > 0) {
       const parts = filtros.distritos
@@ -44,54 +98,35 @@ export async function buscarPropiedades(filtros = {}) {
     }
 
     // ============================================
-    // TIPO — ESTRICTO
+    // TIPO — REGEXP estricta
     // ============================================
     if (filtros.tipo) {
       const tipo = clean(filtros.tipo).toLowerCase();
-
-      // Coincidencia estricta solo si aparece como palabra
       query += ` AND LOWER(title) REGEXP '(\\\\b${tipo}\\\\b)'`;
     }
 
     // ============================================
-    // DORMITORIOS
+    // DORMITORIOS / BAÑOS / COCHERAS
     // ============================================
-    if (!isNaN(filtros.bedrooms) && filtros.bedrooms > 0) {
-      query += ` AND bedrooms >= ${Number(filtros.bedrooms)}`;
-    }
-
-    // ============================================
-    // BAÑOS
-    // ============================================
-    if (!isNaN(filtros.bathrooms) && filtros.bathrooms > 0) {
-      query += ` AND bathrooms >= ${Number(filtros.bathrooms)}`;
-    }
-
-    // ============================================
-    // COCHERAS
-    // ============================================
-    if (!isNaN(filtros.cocheras) && filtros.cocheras > 0) {
-      query += ` AND cocheras >= ${Number(filtros.cocheras)}`;
-    }
+    if (filtros.bedrooms > 0) query += ` AND bedrooms >= ${Number(filtros.bedrooms)}`;
+    if (filtros.bathrooms > 0) query += ` AND bathrooms >= ${Number(filtros.bathrooms)}`;
+    if (filtros.cocheras > 0) query += ` AND cocheras >= ${Number(filtros.cocheras)}`;
 
     // ============================================
     // ÁREA mínima
     // ============================================
-    if (!isNaN(filtros.area_min) && filtros.area_min > 0) {
+    if (filtros.area_min > 0) {
       query += ` AND area >= ${Number(filtros.area_min)}`;
     }
 
     // ============================================
-    // PRECIO mínimo
+    // PRECIO mínimo / máximo
     // ============================================
-    if (!isNaN(filtros.precio_min) && filtros.precio_min > 0) {
+    if (filtros.precio_min > 0) {
       query += ` AND price >= ${Number(filtros.precio_min)}`;
     }
 
-    // ============================================
-    // PRECIO máximo
-    // ============================================
-    if (!isNaN(filtros.precio_max) && filtros.precio_max > 0) {
+    if (filtros.precio_max > 0) {
       query += ` AND price <= ${Number(filtros.precio_max)}`;
     }
 
@@ -110,44 +145,66 @@ export async function buscarPropiedades(filtros = {}) {
           case "negociable":
             query += ` AND (description LIKE '%negociable%')`;
             break;
-          case "papeles_ok":
-            query += ` AND (description LIKE '%papeles%' OR description LIKE '%documentos%')`;
-            break;
-          case "estreno":
-            query += ` AND (description LIKE '%estreno%' OR title LIKE '%estreno%')`;
-            break;
         }
       });
     }
 
     // ============================================
-    // ORDENAMIENTO: 1) Coincidencia exacta 2) Recientes
+    // ORDEN SQL BASE
     // ============================================
     query += `
-      ORDER BY
-        created_at DESC,
-        price ASC
+      ORDER BY created_at DESC, price ASC
     `;
 
     const [rows] = await pool.query(query);
-    return rows;
+
+    // ============================================
+    // RANKING SEMÁNTICO (FASE 5.6)
+    // ============================================
+    return applySemanticRanking(rows, semanticPrefs);
   } catch (error) {
     logError("buscarPropiedades", error);
     return [];
   }
 }
 
-// ========================================================
-// PROPIEDADES SUGERIDAS — SOLO SI NO HAY RESULTADOS
-// ========================================================
+// -------------------------------------------------------
+// SUGERIDAS FASE 5.6
+// BASADAS EN ZONA + PRECIO APROX + TIPO
+// -------------------------------------------------------
 export async function buscarSugeridas(filtros = {}) {
   try {
-    const [rows] = await pool.query(`
+    let query = `
       SELECT *
       FROM properties
-      ORDER BY RAND()
-      LIMIT 6
-    `);
+      WHERE 1 = 1
+    `;
+
+    // Preferimos sugeridas dentro de la misma zona
+    if (filtros.distritos?.length > 0) {
+      const parts = filtros.distritos
+        .map((d) => `location LIKE '%${clean(d)}%'`)
+        .join(" OR ");
+      query += ` AND (${parts})`;
+    }
+
+    // Tipo preferente
+    if (filtros.tipo) {
+      const tipo = clean(filtros.tipo).toLowerCase();
+      query += ` AND LOWER(title) REGEXP '(\\\\b${tipo}\\\\b)'`;
+    }
+
+    // Rango sugerido por precio
+    if (filtros.precio_max > 0) {
+      const low = Number(filtros.precio_max) * 0.6;
+      const high = Number(filtros.precio_max) * 1.3;
+      query += ` AND price BETWEEN ${low} AND ${high}`;
+    }
+
+    query += ` ORDER BY RAND() LIMIT 10`;
+
+    const [rows] = await pool.query(query);
+
     return rows;
   } catch (error) {
     logError("buscarSugeridas", error);
