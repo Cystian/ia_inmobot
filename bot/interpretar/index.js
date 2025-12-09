@@ -1,11 +1,11 @@
 // /bot/interpretar/index.js
 // -------------------------------------------------------
-// Orquesta todas las etapas v5:
-// 1. Normaliza el texto
-// 2. IA detecta intención basee
-// 3. Se enriquecen filtros con reglas
-// 4. Se extraen preferencias semánticas + follow-ups
-// 5. Router envía al controlador correctoox
+// Motor principal FASE 5.6
+// - Maneja sesión
+// - IA (Groq) + reglas estrictas
+// - Follow-up real
+// - Intento inversión
+// - Leads de Facebook Ads
 // -------------------------------------------------------
 
 import { normalizeText } from "./normalize.js";
@@ -15,14 +15,60 @@ import { routeIntent } from "./router.js";
 import { getSession, updateSession } from "./contextManager.js";
 import { extractSemanticPreferences } from "./semanticPreferences.js";
 
+// 🔹 Detecta Leads de Facebook Ads
+function esLeadMeta(msg) {
+  const low = msg.toLowerCase();
+  return (
+    low.includes("nombre:") ||
+    low.includes("telefono:") ||
+    low.includes("teléfono:") ||
+    low.includes("correo:") ||
+    low.includes("email:") ||
+    low.includes("presupuesto") ||
+    low.includes("lead")
+  );
+}
+
+// 🔹 Palabras clave de inversión (sin IA)
+const KW_INVERSION = [
+  "invertir",
+  "inversion",
+  "inversión",
+  "negocio",
+  "rentable",
+  "retorno",
+  "revaloriz",
+  "crezca",
+  "ganancia",
+  "oportunidad de inversión"
+];
+
 export default async function interpretar(userMessage = "", userPhone = "") {
   const raw = userMessage || "";
   const msgNormalizado = normalizeText(raw);
+  const lower = raw.toLowerCase().trim();
 
-  // 1️⃣ Obtener sesión previa ANTES de IA
+  // ======================================================
+  // 1️⃣ OBTENER SESIÓN ANTES DE CUALQUIER PROCESO
+  // ======================================================
   const session = getSession(userPhone);
 
-  // 2️⃣ IA: intención + filtros + follow-up
+  // ======================================================
+  // 2️⃣ Detectar lead de Meta Ads ANTES que cualquier IA
+  // ======================================================
+  if (esLeadMeta(lower)) {
+    updateSession(userPhone, {
+      lastIntent: "lead_meta",
+      isLead: true,
+      hasGreeted: true
+    });
+
+    return "Perfecto, ya recibí tus datos 😊. En un momento te mostraré opciones ideales según tu presupuesto.";
+  }
+
+  // ======================================================
+  // 3️⃣ Obtener IA (intención + filtros base)
+  // ======================================================
   const {
     intencion,
     filtrosBase,
@@ -31,54 +77,48 @@ export default async function interpretar(userMessage = "", userPhone = "") {
     esFollowUp
   } = await getIaAnalysis(raw, msgNormalizado, session);
 
-  /////
-  // Detectar inversión ANTES de usar la intención de IA
-  const msgLower = raw.toLowerCase();
-
-  const KW_INVERSION = [
-    "invertir",
-    "inversión",
-    "revalorice",
-    "revalorización",
-    "para negocio",
-    "para proyecto",
-    "local comercial",
-    "terreno para negocio",
-    "retorno",
-    "rentable",
-    "crezca rápido",
-    "ganancia"
-  ];
-
   let intencionFinal = intencion;
 
-  // Si detectamos inversión → forzamos el intent
-  if (KW_INVERSION.some(k => msgLower.includes(k))) {
+  // ======================================================
+  // 4️⃣ Intento de inversión (tiene prioridad sobre IA)
+  // ======================================================
+  if (KW_INVERSION.some(k => lower.includes(k))) {
     intencionFinal = "inversion";
   }
-//////
-  
-  // 3️⃣ Si es saludo simple → se devuelve directamente
-  if (esSaludoSimple) {
+
+  // ======================================================
+  // 5️⃣ Manejo de saludo único por sesión
+  // ======================================================
+  if (esSaludoSimple && !session.hasGreeted) {
+    updateSession(userPhone, { hasGreeted: true });
     return iaRespuesta;
   }
 
-  // 4️⃣ Reglas adicionales (cocheras, baños, distritos, etc.)
-  const filtrosFinales = enrichFiltersWithRules(msgNormalizado, filtrosBase);
+  // ======================================================
+  // 6️⃣ Aplicar reglas adicionales (strict zones, baños, m2…)
+  // ======================================================
+  const filtrosFinales = enrichFiltersWithRules(msgNormalizado, filtrosBase, session);
 
-  // 5️⃣ Preferencias semánticas (premium, moderno, tranquilo, etc.)
+  // ======================================================
+  // 7️⃣ Preferencias semánticas (premium, moderno…)
+  // ======================================================
   const semanticPrefs = extractSemanticPreferences(msgNormalizado, session);
 
-  // 6️⃣ Actualizar memoria conversacional
+  // ======================================================
+  // 8️⃣ Actualizar sesión
+  // ======================================================
   updateSession(userPhone, {
     lastMessage: raw,
     lastIntent: intencionFinal,
     lastFilters: filtrosFinales,
     semanticPrefs,
-    esFollowUp
-});
+    esFollowUp,
+    hasGreeted: true // evita saludos repetidos
+  });
 
-  // 7️⃣ Enrutar hacia controlador final
+  // ======================================================
+  // 9️⃣ Enrutar controlador final
+  // ======================================================
   const respuesta = await routeIntent(intencionFinal, filtrosFinales, {
     iaRespuesta,
     rawMessage: raw,
@@ -88,9 +128,10 @@ export default async function interpretar(userMessage = "", userPhone = "") {
     esFollowUp
   });
 
-  // 8️⃣ Si el controlador devolvió null (solo envió imágenes/texto), no respondemos texto adicional
+  // ======================================================
+  // 🔟 Si el controlador envió los mensajes directamente → no devolvemos texto
+  // ======================================================
   if (respuesta === null) return null;
 
-  return respuesta || "¿En qué puedo ayudarte?";
+  return respuesta || "¿En qué puedo ayudarte ahora?";
 }
-
