@@ -1,44 +1,59 @@
 // /bot/interpretar/router.js
 // -------------------------------------------------------
-// Router oficial fase 5–6. Sin loops, sin repeticiones,
-// follow-up inteligente y compatibilidad completa.
+// Router oficial FASE 5.6
+// ● Maneja leads de Facebook
+// ● Saludo único por sesión
+// ● Follow-up inteligente
+// ● Inversión integrada
+// ● Zero loops
 // -------------------------------------------------------
 
 import propiedadesController from "../controllers/propiedadesController.js";
 import saludoController from "../controllers/saludoController.js";
 import ayudaController from "../controllers/ayudaController.js";
 import detallePropiedadController from "../controllers/detallePropiedadController.js";
-import inversionController from "../controllers/inversionController.js"; // ✅ IMPORT NECESARIO
+import inversionController from "../controllers/inversionController.js";
 import { MENSAJES } from "../utils/messages.js";
 
 export async function routeIntent(intencion, filtros, contexto = {}) {
-  const { esFollowUp, session = {} } = contexto;
+  const { esFollowUp, session = {}, userPhone } = contexto;
 
   // ==============================================
-  // 1️⃣ FOLLOW-UP → Mantiene intención coherente
+  // 0️⃣ LEAD DE FACEBOOK (alta prioridad)
+  // ==============================================
+  if (intencion === "lead_meta" || session.isLead) {
+    return `
+Gracias por tu interés 👍  
+Voy a analizar tus datos y prepararte opciones ideales según tu presupuesto.
+
+¿Tienes alguna zona de preferencia?
+    `;
+  }
+
+  // ==============================================
+  // 1️⃣ FOLLOW-UP INTELIGENTE
   // ==============================================
   if (esFollowUp) {
-    const intentPrevio = session.lastIntent || "buscar_propiedades";
+    const prev = session.lastIntent || "buscar_propiedades";
 
-    // Follow-up sobre lista de propiedades
-    if (intentPrevio === "buscar_propiedades") {
-      return propiedadesController.buscar(filtros, {
-        ...contexto,
-        esFollowUp: true
-      });
-    }
+    switch (prev) {
+      case "buscar_propiedades":
+        return propiedadesController.buscar(filtros, {
+          ...contexto,
+          esFollowUp: true
+        });
 
-    // Follow-up sobre detalle de propiedad
-    if (intentPrevio === "pregunta_propiedad") {
-      return detallePropiedadController.responder(contexto);
-    }
+      case "pregunta_propiedad":
+        return detallePropiedadController.responder(contexto);
 
-    // Follow-up sobre inversión
-    if (intentPrevio === "inversion") {
-      return inversionController.recomendar(filtros, {
-        ...contexto,
-        esFollowUp: true
-      });
+      case "inversion":
+        return inversionController.recomendar(filtros, {
+          ...contexto,
+          esFollowUp: true
+        });
+
+      default:
+        return ayudaController.generica(contexto);
     }
   }
 
@@ -51,20 +66,24 @@ export async function routeIntent(intencion, filtros, contexto = {}) {
 
     case "saludo":
     case "saludo_simple":
+      // Saludo único por sesión
+      if (session.hasGreeted) {
+        return null; // no volvemos a saludar
+      }
       return saludoController.saludar();
-
-    case "despedida":
-      return MENSAJES.despedida;
 
     case "pregunta_propiedad":
       return detallePropiedadController.responder(contexto);
 
     case "inversion":
-      return inversionController.recomendar(filtros, contexto); // ✔ AHORA FUNCIONA
+      return inversionController.recomendar(filtros, contexto);
+
+    case "despedida":
+      return MENSAJES.despedida;
 
     default:
       // ==============================================
-      // 3️⃣ INTENCIÓN AMBIGUA → Ayuda genérica
+      // 3️⃣ Fallback corporativo reforzado (intención “otro”)
       // ==============================================
       return ayudaController.generica(contexto);
   }
