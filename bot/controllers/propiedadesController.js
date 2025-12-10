@@ -1,11 +1,6 @@
 // /bot/controllers/propiedadesController.js
 // -------------------------------------------------------
-// Controlador FASE 5.7 — Alineado con:
-// - IntentClassifier 5.7 + E3
-// - preTypeExtractor (refuerzo de tipo)
-// - SendMessageManager Premium
-// - Follow-Up real, sin loops ni repeticiones
-// - Paginación inteligente compatible con inversión
+// Controlador FASE 5.7 — FINAL PRO
 // -------------------------------------------------------
 
 import {
@@ -20,33 +15,31 @@ import {
 } from "../services/sendMessageManager.js";
 
 import { updateSession } from "../interpretar/contextManager.js";
+import { extractTipo } from "../interpretar/preTypeExtractor.js"; // ✅ CORRECTO
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
 import { logInfo } from "../utils/log.js";
-import { extractTipo } from "../interpretar/preTypeExtractor.js"; // 👈 IMPORT CORRECTO
 
 const ITEMS_PER_PAGE = 6;
 
-// Activadores de follow-up explícito
 const FOLLOW_TRIGGERS = [
-  "más opciones", "mas opciones",
-  "muestrame mas", "muéstrame más",
-  "otra opcion", "otra opción",
-  "siguiente", "más", "mas"
+  "más opciones","mas opciones",
+  "muestrame mas","muéstrame más",
+  "otra opcion","otra opción",
+  "siguiente","más","mas"
 ];
 
 const propiedadesController = {
   async buscar(filtros = {}, contexto = {}) {
-    let {
-      iaRespuesta,       // lo mantenemos por compat, aunque ya no lo usamos
+    const {
       userPhone,
-      session = {},
+      session,
       rawMessage,
       semanticPrefs,
       esFollowUp
     } = contexto;
 
-    logInfo("BUSCAR PROPIEDADES — FASE 5.7", {
+    logInfo("BUSCAR PROPIEDADES — FINAL PRO", {
       filtros,
       rawMessage,
       semanticPrefs,
@@ -54,35 +47,27 @@ const propiedadesController = {
     });
 
     const msg = (rawMessage || "").toLowerCase();
-
-    // ----------------------------------------------------------
-    // 🔍 Refuerzo de TIPO usando el mensaje crudo del usuario
-    // ----------------------------------------------------------
-    const tipoMensaje = extractTipo(rawMessage || "");
-    if (tipoMensaje && !filtros.tipo) {
-      filtros = { ...filtros, tipo: tipoMensaje };
-      logInfo("Refuerzo tipo por preTypeExtractor", { tipoMensaje });
-    }
-
-    // ----------------------------------------------------------
-    // 1️⃣ Paginación base
-    // ----------------------------------------------------------
     let page = esFollowUp ? (session.lastPage || 1) : 1;
 
     // ----------------------------------------------------------
-    // 2️⃣ BÚSQUEDA PRINCIPAL (con ranking semántico opcional)
+    // 🔥 REFORZAR TIPO ANTES DE BUSCAR
+    // ----------------------------------------------------------
+    const tipoAuto = extractTipo(rawMessage);
+    if (tipoAuto) {
+      filtros.tipo = tipoAuto;
+      console.log("⚡ Tipo reforzado por preTypeExtractor:", tipoAuto);
+    }
+
+    // ----------------------------------------------------------
+    // 1️⃣ BÚSQUEDA PRINCIPAL
     // ----------------------------------------------------------
     let propiedades = await buscarPropiedades(filtros, semanticPrefs);
 
     // ----------------------------------------------------------
-    // 3️⃣ SIN RESULTADOS → SUGERIDAS
+    // 2️⃣ SIN RESULTADOS → SUGERIDAS
     // ----------------------------------------------------------
     if (propiedades.length === 0) {
-      await sendTextPremium(
-        userPhone,
-        MENSAJES.intro_propiedades_sugeridas,
-        session
-      );
+      await sendTextPremium(userPhone, MENSAJES.intro_propiedades_sugeridas, session);
 
       propiedades = await buscarSugeridas(filtros);
 
@@ -96,7 +81,7 @@ const propiedadesController = {
       if (propiedades.length === 0) {
         await sendTextPremium(
           userPhone,
-          "Por ahora no tengo alternativas exactas, pero puedo ampliar zonas o ajustar precio si deseas 😊.",
+          "Por ahora no tengo alternativas exactas, pero puedo ampliar zona o ajustar precio si deseas 😊.",
           session
         );
         return null;
@@ -104,7 +89,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------------
-    // 4️⃣ FOLLOW-UP EXPLÍCITO (usuario pide MÁS)
+    // 3️⃣ FOLLOW-UP: “más”, “otra opción”
     // ----------------------------------------------------------
     const isFollowTrigger = FOLLOW_TRIGGERS.some(t => msg.includes(t));
 
@@ -119,42 +104,33 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------------
-    // 5️⃣ PAGINACIÓN REAL
+    // 4️⃣ PAGINACIÓN
     // ----------------------------------------------------------
     const start = (page - 1) * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
     const propsPagina = propiedades.slice(start, end);
 
-    // ----------------------------------------------------------
-    // 6️⃣ SIN MÁS PÁGINAS
-    // ----------------------------------------------------------
     if (propsPagina.length === 0) {
       await sendTextPremium(
         userPhone,
-        "Ya no tengo más propiedades dentro de estos filtros. 😊\n" +
-          "Puedo ampliar zona, precio o dormitorios si deseas.",
+        "Ya no tengo más propiedades dentro de estos filtros. 😊\nPuedes ajustar zona, precio o dormitorios.",
         session
       );
 
       await sendTextPremium(userPhone, cierrePremium(), session);
-
       updateSession(userPhone, { lastPage: page });
       return null;
     }
 
     // ----------------------------------------------------------
-    // 7️⃣ INTRO (solo primera vez, SIN usar texto de Groq)
+    // 5️⃣ INTRO (solo primera vez)
     // ----------------------------------------------------------
     if (!esFollowUp && !isFollowTrigger) {
-      await sendTextPremium(
-        userPhone,
-        MENSAJES.intro_propiedades_default,
-        session
-      );
+      await sendTextPremium(userPhone, MENSAJES.intro_propiedades_default, session);
     }
 
     // ----------------------------------------------------------
-    // 8️⃣ ENVÍO PREMIUM — PROPIEDADES
+    // 6️⃣ ENVÍO PREMIUM
     // ----------------------------------------------------------
     for (const p of propsPagina) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
@@ -180,7 +156,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------------
-    // 9️⃣ ¿HAY MÁS?
+    // 7️⃣ ¿HAY MÁS?
     // ----------------------------------------------------------
     const hasMore = propiedades.length > end;
 
@@ -191,16 +167,12 @@ const propiedadesController = {
         session
       );
     } else {
-      await sendTextPremium(
-        userPhone,
-        "Estas son *todas* las opciones disponibles según tu búsqueda 😊.",
-        session
-      );
+      await sendTextPremium(userPhone, "Estas son *todas* las opciones disponibles 😊.", session);
       await sendTextPremium(userPhone, cierrePremium(), session);
     }
 
     // ----------------------------------------------------------
-    // 🔟 GUARDAR CONTEXTO COMPLETO
+    // 8️⃣ GUARDAR CONTEXTO
     // ----------------------------------------------------------
     updateSession(userPhone, {
       lastIntent: "buscar_propiedades",
@@ -215,3 +187,4 @@ const propiedadesController = {
 };
 
 export default propiedadesController;
+
