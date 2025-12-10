@@ -1,8 +1,8 @@
 // /bot/controllers/propiedadesController.js
 // -------------------------------------------------------
 // Controlador FASE 5.7 — Alineado con:
-// - IntentClassifier 5.7
-// - EntityExtractor 5.6+
+// - IntentClassifier 5.7 + E3
+// - preTypeExtractor (refuerzo de tipo)
 // - SendMessageManager Premium
 // - Follow-Up real, sin loops ni repeticiones
 // - Paginación inteligente compatible con inversión
@@ -23,23 +23,24 @@ import { updateSession } from "../interpretar/contextManager.js";
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
 import { logInfo } from "../utils/log.js";
+import { extractTipo } from "../interpretar/preTypeExtractor.js"; // 👈 IMPORT CORRECTO
 
 const ITEMS_PER_PAGE = 6;
 
 // Activadores de follow-up explícito
 const FOLLOW_TRIGGERS = [
-  "más opciones","mas opciones",
-  "muestrame mas","muéstrame más",
-  "otra opcion","otra opción",
-  "siguiente","más","mas"
+  "más opciones", "mas opciones",
+  "muestrame mas", "muéstrame más",
+  "otra opcion", "otra opción",
+  "siguiente", "más", "mas"
 ];
 
 const propiedadesController = {
   async buscar(filtros = {}, contexto = {}) {
-    const {
-      iaRespuesta,       // ya no lo usamos para intro, pero lo conservamos por compat
+    let {
+      iaRespuesta,       // lo mantenemos por compat, aunque ya no lo usamos
       userPhone,
-      session,
+      session = {},
       rawMessage,
       semanticPrefs,
       esFollowUp
@@ -53,27 +54,29 @@ const propiedadesController = {
     });
 
     const msg = (rawMessage || "").toLowerCase();
+
+    // ----------------------------------------------------------
+    // 🔍 Refuerzo de TIPO usando el mensaje crudo del usuario
+    // ----------------------------------------------------------
+    const tipoMensaje = extractTipo(rawMessage || "");
+    if (tipoMensaje && !filtros.tipo) {
+      filtros = { ...filtros, tipo: tipoMensaje };
+      logInfo("Refuerzo tipo por preTypeExtractor", { tipoMensaje });
+    }
+
+    // ----------------------------------------------------------
+    // 1️⃣ Paginación base
+    // ----------------------------------------------------------
     let page = esFollowUp ? (session.lastPage || 1) : 1;
 
-// ----------------------------------------------------------
-// 🔍 Refuerzo: aplicar detección de tipo ANTES de buscar
-// ----------------------------------------------------------
-import { extractPreType } from "../interpretar/preTypeExtractor.js";
+    // ----------------------------------------------------------
+    // 2️⃣ BÚSQUEDA PRINCIPAL (con ranking semántico opcional)
+    // ----------------------------------------------------------
+    let propiedades = await buscarPropiedades(filtros, semanticPrefs);
 
-const tipoDetectado = extractPreType(rawMessage);
-if (tipoDetectado) {
-  filtros.tipo = tipoDetectado;
-  console.log("⚡ Tipo reforzado por preTypeExtractor:", tipoDetectado);
-}
-
-// ----------------------------------------------------------
-// 1️⃣ BÚSQUEDA PRINCIPAL (con ranking semántico)
-// ----------------------------------------------------------
-let propiedades = await buscarPropiedades(filtros, semanticPrefs);
-
-    // ==========================================================
-    // 2️⃣ SIN RESULTADOS → SUGERIDAS
-    // ==========================================================
+    // ----------------------------------------------------------
+    // 3️⃣ SIN RESULTADOS → SUGERIDAS
+    // ----------------------------------------------------------
     if (propiedades.length === 0) {
       await sendTextPremium(
         userPhone,
@@ -100,9 +103,9 @@ let propiedades = await buscarPropiedades(filtros, semanticPrefs);
       }
     }
 
-    // ==========================================================
-    // 3️⃣ FOLLOW-UP EXPLÍCITO (usuario pide MÁS)
-    // ==========================================================
+    // ----------------------------------------------------------
+    // 4️⃣ FOLLOW-UP EXPLÍCITO (usuario pide MÁS)
+    // ----------------------------------------------------------
     const isFollowTrigger = FOLLOW_TRIGGERS.some(t => msg.includes(t));
 
     if (isFollowTrigger) {
@@ -115,16 +118,16 @@ let propiedades = await buscarPropiedades(filtros, semanticPrefs);
       );
     }
 
-    // ==========================================================
-    // 4️⃣ PAGINACIÓN REAL
-    // ==========================================================
+    // ----------------------------------------------------------
+    // 5️⃣ PAGINACIÓN REAL
+    // ----------------------------------------------------------
     const start = (page - 1) * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
     const propsPagina = propiedades.slice(start, end);
 
-    // ==========================================================
-    // 5️⃣ SIN MÁS PÁGINAS
-    // ==========================================================
+    // ----------------------------------------------------------
+    // 6️⃣ SIN MÁS PÁGINAS
+    // ----------------------------------------------------------
     if (propsPagina.length === 0) {
       await sendTextPremium(
         userPhone,
@@ -139,9 +142,9 @@ let propiedades = await buscarPropiedades(filtros, semanticPrefs);
       return null;
     }
 
-    // ==========================================================
-    // 6️⃣ INTRO (solo primera vez, SIN usar texto de Groq)
-    // ==========================================================
+    // ----------------------------------------------------------
+    // 7️⃣ INTRO (solo primera vez, SIN usar texto de Groq)
+    // ----------------------------------------------------------
     if (!esFollowUp && !isFollowTrigger) {
       await sendTextPremium(
         userPhone,
@@ -150,9 +153,9 @@ let propiedades = await buscarPropiedades(filtros, semanticPrefs);
       );
     }
 
-    // ==========================================================
-    // 7️⃣ ENVÍO PREMIUM — PROPIEDADES
-    // ==========================================================
+    // ----------------------------------------------------------
+    // 8️⃣ ENVÍO PREMIUM — PROPIEDADES
+    // ----------------------------------------------------------
     for (const p of propsPagina) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
 
@@ -176,9 +179,9 @@ let propiedades = await buscarPropiedades(filtros, semanticPrefs);
       }
     }
 
-    // ==========================================================
-    // 8️⃣ ¿HAY MÁS?
-    // ==========================================================
+    // ----------------------------------------------------------
+    // 9️⃣ ¿HAY MÁS?
+    // ----------------------------------------------------------
     const hasMore = propiedades.length > end;
 
     if (hasMore) {
@@ -196,9 +199,9 @@ let propiedades = await buscarPropiedades(filtros, semanticPrefs);
       await sendTextPremium(userPhone, cierrePremium(), session);
     }
 
-    // ==========================================================
-    // 9️⃣ GUARDAR CONTEXTO COMPLETO
-    // ==========================================================
+    // ----------------------------------------------------------
+    // 🔟 GUARDAR CONTEXTO COMPLETO
+    // ----------------------------------------------------------
     updateSession(userPhone, {
       lastIntent: "buscar_propiedades",
       lastFilters: filtros,
