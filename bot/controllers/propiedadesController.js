@@ -1,6 +1,6 @@
 // /bot/controllers/propiedadesController.js
 // -------------------------------------------------------
-// Controlador FASE 5.7 — FINAL PRO
+// Controlador FASE 5.7 — VERSIÓN FINAL PRO
 // -------------------------------------------------------
 
 import {
@@ -15,10 +15,11 @@ import {
 } from "../services/sendMessageManager.js";
 
 import { updateSession } from "../interpretar/contextManager.js";
-import { extractTipo } from "../interpretar/preTypeExtractor.js"; // ✅ CORRECTO
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
 import { logInfo } from "../utils/log.js";
+
+import { extractTipo } from "../interpretar/preTypeExtractor.js"; // ✔ IMPORT CORRECTO
 
 const ITEMS_PER_PAGE = 6;
 
@@ -39,7 +40,7 @@ const propiedadesController = {
       esFollowUp
     } = contexto;
 
-    logInfo("BUSCAR PROPIEDADES — FINAL PRO", {
+    logInfo("BUSCAR PROPIEDADES — CONTROLADOR FINAL", {
       filtros,
       rawMessage,
       semanticPrefs,
@@ -47,50 +48,56 @@ const propiedadesController = {
     });
 
     const msg = (rawMessage || "").toLowerCase();
-    let page = esFollowUp ? (session.lastPage || 1) : 1;
 
-    // ----------------------------------------------------------
-    // 🔥 REFORZAR TIPO ANTES DE BUSCAR
-    // ----------------------------------------------------------
-    const tipoAuto = extractTipo(rawMessage);
-    if (tipoAuto) {
-      filtros.tipo = tipoAuto;
-      console.log("⚡ Tipo reforzado por preTypeExtractor:", tipoAuto);
+    // ----------------------------------------------------
+    // 🔥 REFORZAR TIPO SI EL USUARIO LO MENSIONA
+    // ----------------------------------------------------
+    const tipoDetectado = extractTipo(rawMessage);
+    if (tipoDetectado) {
+      filtros.tipo = tipoDetectado;
+      console.log("🔥 Tipo reforzado:", tipoDetectado);
     }
 
-    // ----------------------------------------------------------
-    // 1️⃣ BÚSQUEDA PRINCIPAL
-    // ----------------------------------------------------------
-    let propiedades = await buscarPropiedades(filtros, semanticPrefs);
+    // ----------------------------------------------------
+    // 🔍 BÚSQUEDA PRINCIPAL
+    // ----------------------------------------------------
+    const propiedades = await buscarPropiedades(filtros, semanticPrefs);
 
-    // ----------------------------------------------------------
-    // 2️⃣ SIN RESULTADOS → SUGERIDAS
-    // ----------------------------------------------------------
-    if (propiedades.length === 0) {
-      await sendTextPremium(userPhone, MENSAJES.intro_propiedades_sugeridas, session);
+    let allProps = propiedades;
 
-      propiedades = await buscarSugeridas(filtros);
+    // ----------------------------------------------------
+    // ❌ SIN RESULTADOS
+    // ----------------------------------------------------
+    if (allProps.length === 0) {
+      await sendTextPremium(
+        userPhone,
+        MENSAJES.intro_propiedades_sugeridas,
+        session
+      );
+
+      allProps = await buscarSugeridas(filtros);
 
       updateSession(userPhone, {
         lastIntent: "buscar_propiedades",
         lastFilters: filtros,
-        lastProperties: propiedades,
+        lastProperties: allProps,
         lastPage: 1
       });
 
-      if (propiedades.length === 0) {
+      if (allProps.length === 0) {
         await sendTextPremium(
           userPhone,
-          "Por ahora no tengo alternativas exactas, pero puedo ampliar zona o ajustar precio si deseas 😊.",
+          "No encontré opciones exactas, pero puedo ajustar zona o presupuesto 😊.",
           session
         );
         return null;
       }
     }
 
-    // ----------------------------------------------------------
-    // 3️⃣ FOLLOW-UP: “más”, “otra opción”
-    // ----------------------------------------------------------
+    // ----------------------------------------------------
+    // 🔁 FOLLOW-UP (más opciones)
+    // ----------------------------------------------------
+    let page = esFollowUp ? (session.lastPage || 1) : 1;
     const isFollowTrigger = FOLLOW_TRIGGERS.some(t => msg.includes(t));
 
     if (isFollowTrigger) {
@@ -103,35 +110,38 @@ const propiedadesController = {
       );
     }
 
-    // ----------------------------------------------------------
-    // 4️⃣ PAGINACIÓN
-    // ----------------------------------------------------------
+    // ----------------------------------------------------
+    // 📄 PAGINACIÓN
+    // ----------------------------------------------------
     const start = (page - 1) * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
-    const propsPagina = propiedades.slice(start, end);
+    const propsPagina = allProps.slice(start, end);
 
     if (propsPagina.length === 0) {
       await sendTextPremium(
         userPhone,
-        "Ya no tengo más propiedades dentro de estos filtros. 😊\nPuedes ajustar zona, precio o dormitorios.",
+        "Ya no tengo más propiedades con estos filtros. ¿Deseas ampliar zona o precio? 😊",
         session
       );
-
       await sendTextPremium(userPhone, cierrePremium(), session);
       updateSession(userPhone, { lastPage: page });
       return null;
     }
 
-    // ----------------------------------------------------------
-    // 5️⃣ INTRO (solo primera vez)
-    // ----------------------------------------------------------
+    // ----------------------------------------------------
+    // 🟢 INTRO SOLO UNA VEZ
+    // ----------------------------------------------------
     if (!esFollowUp && !isFollowTrigger) {
-      await sendTextPremium(userPhone, MENSAJES.intro_propiedades_default, session);
+      await sendTextPremium(
+        userPhone,
+        MENSAJES.intro_propiedades_default,
+        session
+      );
     }
 
-    // ----------------------------------------------------------
-    // 6️⃣ ENVÍO PREMIUM
-    // ----------------------------------------------------------
+    // ----------------------------------------------------
+    // 🏡 ENVÍO DE PROPIEDADES
+    // ----------------------------------------------------
     for (const p of propsPagina) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
 
@@ -155,29 +165,33 @@ const propiedadesController = {
       }
     }
 
-    // ----------------------------------------------------------
-    // 7️⃣ ¿HAY MÁS?
-    // ----------------------------------------------------------
-    const hasMore = propiedades.length > end;
+    // ----------------------------------------------------
+    // 🔚 ¿HAY MÁS?
+    // ----------------------------------------------------
+    const hasMore = allProps.length > end;
 
     if (hasMore) {
       await sendTextPremium(
         userPhone,
-        "¿Quieres ver *más opciones* o prefieres afinar tu búsqueda (zona, precio, dormitorios)? 👇",
+        "¿Quieres ver más opciones o prefieres afinar zona/precio? 👇",
         session
       );
     } else {
-      await sendTextPremium(userPhone, "Estas son *todas* las opciones disponibles 😊.", session);
+      await sendTextPremium(
+        userPhone,
+        "Estas son *todas* las opciones disponibles 😊.",
+        session
+      );
       await sendTextPremium(userPhone, cierrePremium(), session);
     }
 
-    // ----------------------------------------------------------
-    // 8️⃣ GUARDAR CONTEXTO
-    // ----------------------------------------------------------
+    // ----------------------------------------------------
+    // 💾 GUARDAR CONTEXTO
+    // ----------------------------------------------------
     updateSession(userPhone, {
       lastIntent: "buscar_propiedades",
       lastFilters: filtros,
-      lastProperties: propiedades,
+      lastProperties: allProps,
       lastPage: page,
       semanticPrefs
     });
