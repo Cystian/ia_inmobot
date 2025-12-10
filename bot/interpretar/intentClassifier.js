@@ -1,6 +1,11 @@
 // /bot/interpretar/intentClassifier.js
 // -------------------------------------------------------
-// Clasificador de intención Groq — FASE 5.7 + E2
+// Clasificador de intención Groq — FASE 5.7 + E2 REAL
+// -------------------------------------------------------
+// Compatible con preTypeExtractor.js
+// Admite tus tipos reales:
+// casa, departamento, terreno, oficina, local comercial,
+// terreno comercial, hotel
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -8,29 +13,54 @@ import { GROQ_API_KEY } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
 import { logError } from "../utils/log.js";
 import { extractFollowUpFilters } from "./entityExtractorFollowUp.js";
+import { extractPreType } from "./preTypeExtractor.js"; // 👈 NUEVO
 
 const client = new Groq({ apiKey: GROQ_API_KEY });
 
-// Palabras que disparan intención de búsqueda
+// -------------------------------------------------------
+// 🔹 TIPOS REALES DE TU NEGOCIO
+// -------------------------------------------------------
+const TIPOS_REALES = [
+  "casa",
+  "departamento",
+  "terreno",
+  "oficina",
+  "local comercial",
+  "terreno comercial",
+  "hotel"
+];
+
+// -------------------------------------------------------
+// 🔹 Palabras que definen intención de búsqueda
+// -------------------------------------------------------
 const PALABRAS_INTENCION = [
-  "casa","departamento","depa","dpto","terreno","lote",
-  "local","oficina","propiedad","inmueble"
+  "casa", "departamento", "depa", "dpto", "terreno", "lote",
+  "local", "oficina", "hotel",
+  "propiedad", "inmueble", "proyecto"
 ];
 
-// Adjetivos semánticos importantes
+// -------------------------------------------------------
+// 🔹 Adjetivos semánticos útiles para ranking
+// -------------------------------------------------------
 const ADJETIVOS_SEMANTICOS = [
-  "bonita","bonito","grande","amplia","amplio","lujosa","lujoso",
-  "económica","economica","barata","barato","moderna","moderno",
-  "nueva","nuevo","remodelada","remodelado","centro","céntrica"
+  "bonita","bonito","grande","amplia","amplio",
+  "lujosa","lujoso","económica","economica",
+  "barata","barato","moderna","moderno",
+  "nueva","nuevo","remodelada","remodelado",
+  "centro","céntrica","céntrico"
 ];
 
-// Saludos
+// -------------------------------------------------------
+// 🔹 Saludos
+// -------------------------------------------------------
 const SALUDOS_PUROS = [
   "hola","buenas","buenos dias","buenas tardes","buenas noches",
   "hey","ola","👋"
 ];
 
-// Follow-up triggers
+// -------------------------------------------------------
+// 🔹 Follow-up
+// -------------------------------------------------------
 const FRASES_FOLLOW_UP = [
   "mas barato","más barato","mas economico","más economico",
   "mas opciones","más opciones","otra opcion","otra opción",
@@ -38,35 +68,50 @@ const FRASES_FOLLOW_UP = [
   "algo mas","algo más","siguiente","otra parecida"
 ];
 
-// Referencias a propiedad previa
+// -------------------------------------------------------
+// 🔹 Referencia a propiedad previa
+// -------------------------------------------------------
 const PROPERTY_REF_WORDS = [
   "esa","ese","esta casa","esa casa","esa propiedad",
   "ese depa","ese departamento","esa vivienda",
   "la primera","la 1","la segunda","la 2","la tercera","la 3",
-  "mas detalles","más detalles","quiero saber mas"
+  "mas detalles","más detalles","quiero saber mas","quiero saber más"
 ];
 
-// Distritos válidos
+// -------------------------------------------------------
+// 🔹 Distritos válidos (anticolapso IA)
+// -------------------------------------------------------
 const ZONAS_VALIDAS = [
   "nuevo chimbote","chimbote","buenos aires",
   "bellamar","villa maria","la caleta","casma"
 ];
 
-// Palabras de inversión
+// -------------------------------------------------------
+// 🔹 Palabras de inversión
+// -------------------------------------------------------
 const KW_INVERSION = [
   "invertir","inversion","inversión","negocio","rentable",
   "retorno","ganancia","revalor","crezca","aprovechar"
 ];
 
 // -------------------------------------------------------
-// FUNCIÓN PRINCIPAL
+// 🚀 FUNCIÓN PRINCIPAL
 // -------------------------------------------------------
-
 export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
+  
   const text = msgNormalizado.toLowerCase().trim();
 
+  // ======================================================
+  // 0️⃣ DETECTAR TIPO CON preTypeExtractor.js
+  // ======================================================
+  const tipoDetectado = extractPreType(text, TIPOS_REALES);
+
+  // ======================================================
+  // 1️⃣ INTENCIÓN BÁSICA
+  // ======================================================
   const contieneIntencion =
-    PALABRAS_INTENCION.some(p => text.includes(p));
+    PALABRAS_INTENCION.some(p => text.includes(p)) ||
+    !!tipoDetectado; // 👈 fuerza intención si detecta tipo
 
   const esSaludoSimple = SALUDOS_PUROS.includes(text);
 
@@ -76,7 +121,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     session.lastProperties.length > 0;
 
   // ======================================================
-  // CAPTURA DE ADJETIVOS SEMÁNTICOS (para ranking)
+  // 2️⃣ Captura de adjetivos semánticos
   // ======================================================
   const detectedAdjectives = ADJETIVOS_SEMANTICOS.filter(a =>
     text.includes(a)
@@ -88,7 +133,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 1. SALUDO
+  // 3️⃣ SALUDO
   // ======================================================
   if (esSaludoSimple && !contieneIntencion && !session.hasGreeted) {
     return {
@@ -102,7 +147,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 2. INTENCIÓN DE INVERSIÓN
+  // 4️⃣ INVERSIÓN
   // ======================================================
   if (KW_INVERSION.some(k => text.includes(k))) {
     return {
@@ -110,33 +155,27 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
       filtrosBase: {},
       semanticPrefs,
       iaRespuesta: "",
-      esSaludoSimple: false,
       esFollowUp: false
     };
   }
 
   // ======================================================
-  // 3. REFERENCIA A PROPIEDAD PREVIA
+  // 5️⃣ REFERENCIA A PROPIEDAD
   // ======================================================
-  const refiere = PROPERTY_REF_WORDS.some(w => text.includes(w));
-
-  if (tieneSesionPrevia && refiere) {
+  if (tieneSesionPrevia && PROPERTY_REF_WORDS.some(w => text.includes(w))) {
     return {
       intencion: "pregunta_propiedad",
       filtrosBase: {},
       semanticPrefs,
       iaRespuesta: MENSAJES.propiedad_referida,
-      esSaludoSimple: false,
       esFollowUp: false
     };
   }
 
   // ======================================================
-  // 4. FOLLOW-UP
+  // 6️⃣ FOLLOW-UP
   // ======================================================
-  const followUp = FRASES_FOLLOW_UP.some(f => text.includes(f));
-
-  if (tieneSesionPrevia && followUp) {
+  if (tieneSesionPrevia && FRASES_FOLLOW_UP.some(f => text.includes(f))) {
     return {
       intencion: session.lastIntent || "buscar_propiedades",
       filtrosBase: extractFollowUpFilters(
@@ -151,9 +190,14 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 5. LLAMADA A Groq (principal)
+  // 7️⃣ GROQ — CLASIFICACIÓN PRINCIPAL
   // ======================================================
+  const introTipo = tipoDetectado
+    ? `El usuario menciona un tipo de propiedad: "${tipoDetectado}".`
+    : "";
+
   const prompt = `
+${introTipo}
 Eres un asistente inmobiliario profesional.
 NO inventes zonas.
 NO inventes distritos.
@@ -161,6 +205,7 @@ NO generes textos interpretativos.
 Responde SOLO JSON.
 
 Mensaje: "${raw}"
+
 Formato:
 {
   "intencion": "buscar_propiedades|saludo|despedida|otro",
@@ -200,6 +245,7 @@ Formato:
       ia = {};
     }
 
+    // Fallback si Groq falla
     if (!ia || !ia.filtros) {
       ia = {
         intencion: contieneIntencion ? "buscar_propiedades" : "otro",
@@ -208,10 +254,13 @@ Formato:
     }
 
     let filtrosBase = ia.filtros;
-    let intencion =
-      ia.intencion || (contieneIntencion ? "buscar_propiedades" : "otro");
 
-    // Filtrar zonas inválidas
+    // Si detectamos tipo por preTypeExtractor → reforzarlo
+    if (tipoDetectado) {
+      filtrosBase.tipo = tipoDetectado;
+    }
+
+    // Filtrar zonas
     if (Array.isArray(filtrosBase.distritos)) {
       filtrosBase.distritos = filtrosBase.distritos.filter(z =>
         ZONAS_VALIDAS.includes(z.toLowerCase())
@@ -219,11 +268,10 @@ Formato:
     }
 
     return {
-      intencion,
+      intencion: ia.intencion || "buscar_propiedades",
       filtrosBase,
       semanticPrefs,
       iaRespuesta: ia.respuesta || "",
-      esSaludoSimple: false,
       esFollowUp: false
     };
 
@@ -235,7 +283,6 @@ Formato:
       filtrosBase: {},
       semanticPrefs,
       iaRespuesta: MENSAJES.ayuda_generica,
-      esSaludoSimple: false,
       esFollowUp: false
     };
   }
