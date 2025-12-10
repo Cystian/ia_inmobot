@@ -55,10 +55,21 @@ const propiedadesController = {
     const msg = (rawMessage || "").toLowerCase();
     let page = esFollowUp ? (session.lastPage || 1) : 1;
 
-    // ==========================================================
-    // 1️⃣ BÚSQUEDA PRINCIPAL (con ranking semántico)
-    // ==========================================================
-    let propiedades = await buscarPropiedades(filtros, semanticPrefs);
+// ----------------------------------------------------------
+// 🔍 Refuerzo: aplicar detección de tipo ANTES de buscar
+// ----------------------------------------------------------
+import { extractPreType } from "../interpretar/preTypeExtractor.js";
+
+const tipoDetectado = extractPreType(rawMessage);
+if (tipoDetectado) {
+  filtros.tipo = tipoDetectado;
+  console.log("⚡ Tipo reforzado por preTypeExtractor:", tipoDetectado);
+}
+
+// ----------------------------------------------------------
+// 1️⃣ BÚSQUEDA PRINCIPAL (con ranking semántico)
+// ----------------------------------------------------------
+let propiedades = await buscarPropiedades(filtros, semanticPrefs);
 
     // ==========================================================
     // 2️⃣ SIN RESULTADOS → SUGERIDAS
