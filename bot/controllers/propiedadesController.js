@@ -1,6 +1,6 @@
 // /bot/controllers/propiedadesController.js
 // -------------------------------------------------------
-// Controlador FASE 5.7 — VERSIÓN FINAL PRO
+// Controlador FASE 5.7 — PREMIUM ADAPTATIVO
 // -------------------------------------------------------
 
 import {
@@ -14,21 +14,38 @@ import {
   cierrePremium
 } from "../services/sendMessageManager.js";
 
+import { extractTipo } from "../interpretar/preTypeExtractor.js";
 import { updateSession } from "../interpretar/contextManager.js";
 import { FRONTEND_BASE_URL } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
 import { logInfo } from "../utils/log.js";
 
-import { extractTipo } from "../interpretar/preTypeExtractor.js"; // ✔ IMPORT CORRECTO
+// --------------------------------------
+// Adaptación de cantidad enviada
+// --------------------------------------
+function calcularItemsPorPagina(filtros, semanticPrefs) {
+  const tieneTipo = !!filtros.tipo;
+  const tieneZona = Array.isArray(filtros.distritos) && filtros.distritos.length > 0;
+  const tienePrecio = filtros.precio_min || filtros.precio_max;
+  const tieneDorms = filtros.bedrooms;
+  const tieneAdjetivos = semanticPrefs?.adjectives?.length > 0;
 
-const ITEMS_PER_PAGE = 6;
+  const especificidad =
+    (tieneTipo ? 1 : 0) +
+    (tieneZona ? 1 : 0) +
+    (tienePrecio ? 1 : 0) +
+    (tieneDorms ? 1 : 0) +
+    (tieneAdjetivos ? 1 : 0);
 
-const FOLLOW_TRIGGERS = [
-  "más opciones","mas opciones",
-  "muestrame mas","muéstrame más",
-  "otra opcion","otra opción",
-  "siguiente","más","mas"
-];
+  // Consulta muy específica → 2–3 resultados
+  if (especificidad >= 3) return 3;
+
+  // Consulta moderada → 4 resultados
+  if (especificidad === 2) return 4;
+
+  // Consulta muy genérica → 6 resultados
+  return 6;
+}
 
 const propiedadesController = {
   async buscar(filtros = {}, contexto = {}) {
@@ -40,7 +57,7 @@ const propiedadesController = {
       esFollowUp
     } = contexto;
 
-    logInfo("BUSCAR PROPIEDADES — CONTROLADOR FINAL", {
+    logInfo("BUSCAR PROPIEDADES — CONTROLADOR PREMIUM", {
       filtros,
       rawMessage,
       semanticPrefs,
@@ -50,7 +67,7 @@ const propiedadesController = {
     const msg = (rawMessage || "").toLowerCase();
 
     // ----------------------------------------------------
-    // 🔥 REFORZAR TIPO SI EL USUARIO LO MENSIONA
+    // 🔥 Refuerzo de TIPO si el usuario lo menciona
     // ----------------------------------------------------
     const tipoDetectado = extractTipo(rawMessage);
     if (tipoDetectado) {
@@ -59,14 +76,13 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 🔍 BÚSQUEDA PRINCIPAL
+    // 🔍 Búsqueda principal
     // ----------------------------------------------------
     const propiedades = await buscarPropiedades(filtros, semanticPrefs);
-
     let allProps = propiedades;
 
     // ----------------------------------------------------
-    // ❌ SIN RESULTADOS
+    // ❌ Sin resultados → sugeridas
     // ----------------------------------------------------
     if (allProps.length === 0) {
       await sendTextPremium(
@@ -95,14 +111,23 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 🔁 FOLLOW-UP (más opciones)
+    // 📄 Calcular cuántos ítems mostrar
     // ----------------------------------------------------
+    const ITEMS_PER_PAGE = calcularItemsPorPagina(filtros, semanticPrefs);
+
     let page = esFollowUp ? (session.lastPage || 1) : 1;
+
+    const FOLLOW_TRIGGERS = [
+      "más opciones","mas opciones",
+      "muestrame mas","muéstrame más",
+      "otra opcion","otra opción",
+      "siguiente","más","mas"
+    ];
+
     const isFollowTrigger = FOLLOW_TRIGGERS.some(t => msg.includes(t));
 
     if (isFollowTrigger) {
       page = (session.lastPage || 1) + 1;
-
       await sendTextPremium(
         userPhone,
         "Perfecto 👌 Te muestro opciones adicionales:",
@@ -111,7 +136,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 📄 PAGINACIÓN
+    // 📄 Paginación real
     // ----------------------------------------------------
     const start = (page - 1) * ITEMS_PER_PAGE;
     const end = start + ITEMS_PER_PAGE;
@@ -120,7 +145,7 @@ const propiedadesController = {
     if (propsPagina.length === 0) {
       await sendTextPremium(
         userPhone,
-        "Ya no tengo más propiedades con estos filtros. ¿Deseas ampliar zona o precio? 😊",
+        "Ya no tengo más propiedades dentro de estos filtros 😊.\nPuedo ampliar zona o presupuesto si deseas.",
         session
       );
       await sendTextPremium(userPhone, cierrePremium(), session);
@@ -129,7 +154,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 🟢 INTRO SOLO UNA VEZ
+    // 🟢 Intro solo la primera vez
     // ----------------------------------------------------
     if (!esFollowUp && !isFollowTrigger) {
       await sendTextPremium(
@@ -140,7 +165,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 🏡 ENVÍO DE PROPIEDADES
+    // 🏡 Enviar propiedades
     // ----------------------------------------------------
     for (const p of propsPagina) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
@@ -166,7 +191,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 🔚 ¿HAY MÁS?
+    // 🔚 ¿Hay más?
     // ----------------------------------------------------
     const hasMore = allProps.length > end;
 
@@ -186,7 +211,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 💾 GUARDAR CONTEXTO
+    // 💾 Guardar estado
     // ----------------------------------------------------
     updateSession(userPhone, {
       lastIntent: "buscar_propiedades",
@@ -201,4 +226,3 @@ const propiedadesController = {
 };
 
 export default propiedadesController;
-
