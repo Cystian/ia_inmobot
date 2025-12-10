@@ -1,11 +1,11 @@
 // /bot/interpretar/intentClassifier.js
 // -------------------------------------------------------
-// Clasificador de intención Groq — FASE 5.7 + E2 REAL
+// Clasificador de intención Groq — FASE 5.7 + E3 FINAL
 // -------------------------------------------------------
-// Compatible con preTypeExtractor.js
-// Admite tus tipos reales:
-// casa, departamento, terreno, oficina, local comercial,
-// terreno comercial, hotel
+// • Compatible con preTypeExtractor.js
+// • Usa tus tipos reales de propiedad
+// • Refuerza intención si detecta tipo aunque Groq falle
+// • Incluye adjetivos semánticos para ranking
 // -------------------------------------------------------
 
 import Groq from "groq-sdk";
@@ -13,12 +13,12 @@ import { GROQ_API_KEY } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
 import { logError } from "../utils/log.js";
 import { extractFollowUpFilters } from "./entityExtractorFollowUp.js";
-import { extractPreType } from "./preTypeExtractor.js"; // 👈 NUEVO
+import { extractTipo } from "./preTypeExtractor.js";   // 👈 FINAL CORRECTO
 
 const client = new Groq({ apiKey: GROQ_API_KEY });
 
 // -------------------------------------------------------
-// 🔹 TIPOS REALES DE TU NEGOCIO
+// 🔹 TIPOS REALES QUE EXISTEN EN TU NEGOCIO
 // -------------------------------------------------------
 const TIPOS_REALES = [
   "casa",
@@ -31,16 +31,17 @@ const TIPOS_REALES = [
 ];
 
 // -------------------------------------------------------
-// 🔹 Palabras que definen intención de búsqueda
+// 🔹 Palabras que expresan intención de búsqueda
 // -------------------------------------------------------
 const PALABRAS_INTENCION = [
-  "casa", "departamento", "depa", "dpto", "terreno", "lote",
-  "local", "oficina", "hotel",
-  "propiedad", "inmueble", "proyecto"
+  "casa","departamento","depa","dpto",
+  "terreno","lote","solar",
+  "local","oficina","hotel",
+  "propiedad","inmueble","proyecto"
 ];
 
 // -------------------------------------------------------
-// 🔹 Adjetivos semánticos útiles para ranking
+// 🔹 Adjetivos semánticos útiles
 // -------------------------------------------------------
 const ADJETIVOS_SEMANTICOS = [
   "bonita","bonito","grande","amplia","amplio",
@@ -51,7 +52,7 @@ const ADJETIVOS_SEMANTICOS = [
 ];
 
 // -------------------------------------------------------
-// 🔹 Saludos
+// 🔹 Saludos puros
 // -------------------------------------------------------
 const SALUDOS_PUROS = [
   "hola","buenas","buenos dias","buenas tardes","buenas noches",
@@ -69,7 +70,7 @@ const FRASES_FOLLOW_UP = [
 ];
 
 // -------------------------------------------------------
-// 🔹 Referencia a propiedad previa
+// 🔹 Referencias a propiedad previa
 // -------------------------------------------------------
 const PROPERTY_REF_WORDS = [
   "esa","ese","esta casa","esa casa","esa propiedad",
@@ -79,7 +80,7 @@ const PROPERTY_REF_WORDS = [
 ];
 
 // -------------------------------------------------------
-// 🔹 Distritos válidos (anticolapso IA)
+// 🔹 Distritos válidos
 // -------------------------------------------------------
 const ZONAS_VALIDAS = [
   "nuevo chimbote","chimbote","buenos aires",
@@ -87,7 +88,7 @@ const ZONAS_VALIDAS = [
 ];
 
 // -------------------------------------------------------
-// 🔹 Palabras de inversión
+// 🔹 Palabras relacionadas a inversión
 // -------------------------------------------------------
 const KW_INVERSION = [
   "invertir","inversion","inversión","negocio","rentable",
@@ -98,20 +99,20 @@ const KW_INVERSION = [
 // 🚀 FUNCIÓN PRINCIPAL
 // -------------------------------------------------------
 export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
-  
+
   const text = msgNormalizado.toLowerCase().trim();
 
   // ======================================================
-  // 0️⃣ DETECTAR TIPO CON preTypeExtractor.js
+  // 0️⃣ DETECCIÓN REAL DE TIPO (preTypeExtractor.js)
   // ======================================================
-  const tipoDetectado = extractPreType(text, TIPOS_REALES);
+  const tipoDetectado = extractTipo(text); // 👈 AHORA USAMOS TU EXTRACTOR REAL
 
   // ======================================================
   // 1️⃣ INTENCIÓN BÁSICA
   // ======================================================
   const contieneIntencion =
     PALABRAS_INTENCION.some(p => text.includes(p)) ||
-    !!tipoDetectado; // 👈 fuerza intención si detecta tipo
+    !!tipoDetectado;  // 👈 Fuerza intención si detecta tipo
 
   const esSaludoSimple = SALUDOS_PUROS.includes(text);
 
@@ -121,7 +122,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
     session.lastProperties.length > 0;
 
   // ======================================================
-  // 2️⃣ Captura de adjetivos semánticos
+  // 2️⃣ DETECTAR ADJETIVOS SEMÁNTICOS
   // ======================================================
   const detectedAdjectives = ADJETIVOS_SEMANTICOS.filter(a =>
     text.includes(a)
@@ -147,7 +148,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 4️⃣ INVERSIÓN
+  // 4️⃣ INTENCIÓN DE INVERSIÓN
   // ======================================================
   if (KW_INVERSION.some(k => text.includes(k))) {
     return {
@@ -160,7 +161,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 5️⃣ REFERENCIA A PROPIEDAD
+  // 5️⃣ REFERENCIA A PROPIEDAD PREVIA
   // ======================================================
   if (tieneSesionPrevia && PROPERTY_REF_WORDS.some(w => text.includes(w))) {
     return {
@@ -190,7 +191,7 @@ export async function getIaAnalysis(raw, msgNormalizado, session = {}) {
   }
 
   // ======================================================
-  // 7️⃣ GROQ — CLASIFICACIÓN PRINCIPAL
+  // 7️⃣ PROMPT GROQ
   // ======================================================
   const introTipo = tipoDetectado
     ? `El usuario menciona un tipo de propiedad: "${tipoDetectado}".`
@@ -239,13 +240,8 @@ Formato:
     content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
 
     let ia = {};
-    try {
-      ia = JSON.parse(content);
-    } catch {
-      ia = {};
-    }
+    try { ia = JSON.parse(content); } catch { ia = {}; }
 
-    // Fallback si Groq falla
     if (!ia || !ia.filtros) {
       ia = {
         intencion: contieneIntencion ? "buscar_propiedades" : "otro",
@@ -255,12 +251,12 @@ Formato:
 
     let filtrosBase = ia.filtros;
 
-    // Si detectamos tipo por preTypeExtractor → reforzarlo
+    // Refuerzo del tipo detectado
     if (tipoDetectado) {
       filtrosBase.tipo = tipoDetectado;
     }
 
-    // Filtrar zonas
+    // Filtrar zonas no válidas
     if (Array.isArray(filtrosBase.distritos)) {
       filtrosBase.distritos = filtrosBase.distritos.filter(z =>
         ZONAS_VALIDAS.includes(z.toLowerCase())
@@ -280,7 +276,7 @@ Formato:
 
     return {
       intencion: contieneIntencion ? "buscar_propiedades" : "otro",
-      filtrosBase: {},
+      filtrosBase: tipoDetectado ? { tipo: tipoDetectado } : {},
       semanticPrefs,
       iaRespuesta: MENSAJES.ayuda_generica,
       esFollowUp: false
