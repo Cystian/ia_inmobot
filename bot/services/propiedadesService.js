@@ -1,14 +1,15 @@
 // /bot/services/propiedadesService.js
 // -------------------------------------------------------
-// FASE 5.7 — Servicio de Propiedades (D Final)
+// FASE 5.7 — Servicio de Propiedades (FINAL PRO)
 // -------------------------------------------------------
+// • Conexión correcta con db.js (pool)
 // • Búsqueda exacta + semántica ligera
-// • Filtro TIPO 100% basado en title
-// • No usa la tabla "tipos"
-// • Mejor coincidencia: casa | departamento | terreno | local
+// • TIPO detectado 100% desde title
+// • Soporta: casa, departamento, terreno, local comercial,
+//   terreno comercial, oficina, hotel
 // -------------------------------------------------------
 
-import db from "../config/db.js";
+import { pool } from "../config/db.js";
 import { logError } from "../utils/log.js";
 
 // Normaliza texto para coincidencias suaves
@@ -49,20 +50,24 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
     }
 
     // ------------------------------
-    // TIPO (casa, departamento, local, terreno)
-    // Solo desde title
+    // TIPO — ultra preciso por title
     // ------------------------------
     if (filtros.tipo) {
       const t = normalize(filtros.tipo);
-
       const patterns = [];
 
       if (t.includes("casa")) patterns.push("%casa%");
-      if (t.includes("depart")) patterns.push("%depa%", "%depart%");
+      if (t.includes("depart")) patterns.push("%depart%", "%depa%", "%dpto%");
+      if (t.includes("oficina")) patterns.push("%oficina%");
+      if (t.includes("local comercial")) patterns.push("%local comercial%");
       if (t.includes("local")) patterns.push("%local%");
+      if (t.includes("terreno comercial")) patterns.push("%terreno comercial%");
       if (t.includes("terreno") || t.includes("lote"))
         patterns.push("%terreno%", "%lote%");
 
+      if (t.includes("hotel")) patterns.push("%hotel%", "%hospedaje%");
+
+      // Aplicar patrón
       if (patterns.length > 0) {
         sql += " AND (";
         patterns.forEach((p, i) => {
@@ -71,9 +76,6 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
           if (i < patterns.length - 1) sql += " OR ";
         });
         sql += ")";
-      } else {
-        sql += " AND LOWER(title) LIKE ?";
-        params.push(`%${t}%`);
       }
     }
 
@@ -107,7 +109,7 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
 
     sql += ` ORDER BY created_at DESC`;
 
-    const [rows] = await db.execute(sql, params);
+    const [rows] = await pool.execute(sql, params);
     return rows || [];
 
   } catch (err) {
@@ -128,9 +130,10 @@ export async function buscarSugeridas(filtros = {}) {
       FROM properties
       WHERE 1 = 1
     `;
+
     const params = [];
 
-    // Sugerencias por zona
+    // Zona
     if (Array.isArray(filtros.distritos) && filtros.distritos.length > 0) {
       sql += ` AND (`;
       filtros.distritos.forEach((d, i) => {
@@ -141,7 +144,7 @@ export async function buscarSugeridas(filtros = {}) {
       sql += `)`;
     }
 
-    // Sugerencias por tipo basado en title
+    // Tipo
     if (filtros.tipo) {
       sql += ` AND LOWER(title) LIKE ?`;
       params.push(`%${normalize(filtros.tipo)}%`);
@@ -149,7 +152,7 @@ export async function buscarSugeridas(filtros = {}) {
 
     sql += ` ORDER BY RAND() LIMIT 6`;
 
-    const [rows] = await db.execute(sql, params);
+    const [rows] = await pool.execute(sql, params);
     return rows || [];
 
   } catch (err) {
