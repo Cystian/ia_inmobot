@@ -1,12 +1,10 @@
 // /bot/services/propiedadesService.js
 // -------------------------------------------------------
-// FASE 5.7 — Servicio de Propiedades (FINAL PRO)
+// FASE 5.7 — Servicio de Propiedades (VERSIÓN FINAL PRO)
 // -------------------------------------------------------
-// • Conexión correcta con db.js (pool)
-// • Búsqueda exacta + semántica ligera
-// • TIPO detectado 100% desde title
-// • Soporta: casa, departamento, terreno, local comercial,
-//   terreno comercial, oficina, hotel
+// • Usa pool desde db.js (no hay export default)
+// • Búsqueda por tipo basada en title REAL
+// • Compatibilidad total con preTypeExtractor + IntentClassifier E3
 // -------------------------------------------------------
 
 import { pool } from "../config/db.js";
@@ -34,6 +32,7 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
       FROM properties
       WHERE 1 = 1
     `;
+
     const params = [];
 
     // ------------------------------
@@ -50,7 +49,7 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
     }
 
     // ------------------------------
-    // TIPO — ultra preciso por title
+    // TIPO basado en title
     // ------------------------------
     if (filtros.tipo) {
       const t = normalize(filtros.tipo);
@@ -58,16 +57,12 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
 
       if (t.includes("casa")) patterns.push("%casa%");
       if (t.includes("depart")) patterns.push("%depart%", "%depa%", "%dpto%");
-      if (t.includes("oficina")) patterns.push("%oficina%");
-      if (t.includes("local comercial")) patterns.push("%local comercial%");
       if (t.includes("local")) patterns.push("%local%");
-      if (t.includes("terreno comercial")) patterns.push("%terreno comercial%");
-      if (t.includes("terreno") || t.includes("lote"))
-        patterns.push("%terreno%", "%lote%");
+      if (t.includes("oficina")) patterns.push("%oficina%");
+      if (t.includes("hotel")) patterns.push("%hotel%");
+      if (t.includes("terreno")) patterns.push("%terreno%");
+      if (t.includes("comercial")) patterns.push("%comercial%");
 
-      if (t.includes("hotel")) patterns.push("%hotel%", "%hospedaje%");
-
-      // Aplicar patrón
       if (patterns.length > 0) {
         sql += " AND (";
         patterns.forEach((p, i) => {
@@ -76,11 +71,14 @@ export async function buscarPropiedades(filtros = {}, semanticPrefs = {}) {
           if (i < patterns.length - 1) sql += " OR ";
         });
         sql += ")";
+      } else {
+        sql += " AND LOWER(title) LIKE ?";
+        params.push(`%${t}%`);
       }
     }
 
     // ------------------------------
-    // RESTO DE FILTROS
+    // FILTROS numéricos
     // ------------------------------
     if (filtros.bedrooms) {
       sql += ` AND bedrooms >= ?`;
@@ -133,7 +131,6 @@ export async function buscarSugeridas(filtros = {}) {
 
     const params = [];
 
-    // Zona
     if (Array.isArray(filtros.distritos) && filtros.distritos.length > 0) {
       sql += ` AND (`;
       filtros.distritos.forEach((d, i) => {
@@ -144,7 +141,6 @@ export async function buscarSugeridas(filtros = {}) {
       sql += `)`;
     }
 
-    // Tipo
     if (filtros.tipo) {
       sql += ` AND LOWER(title) LIKE ?`;
       params.push(`%${normalize(filtros.tipo)}%`);
