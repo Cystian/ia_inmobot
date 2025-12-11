@@ -1,8 +1,5 @@
 // /api/webhook.js
 
-// =========================================
-// 1️⃣ Habilitar bodyParser en Vercel
-// =========================================
 export const config = {
   api: {
     bodyParser: {
@@ -13,14 +10,10 @@ export const config = {
 
 import handlerBot from "../bot/controllers/botController.js";
 
-
 export default async function handler(req, res) {
   try {
     const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN;
 
-    // =========================================
-    // 2️⃣ GET → Validación del webhook (Meta challenge)
-    // =========================================
     if (req.method === "GET") {
       const mode = req.query["hub.mode"];
       const token = req.query["hub.verify_token"];
@@ -35,17 +28,31 @@ export default async function handler(req, res) {
       return res.sendStatus(403);
     }
 
-    // =========================================
-    // 3️⃣ POST → Evento real de WhatsApp
-    // =========================================
     if (req.method === "POST") {
       console.log("📩 POST recibido en webhook:", JSON.stringify(req.body, null, 2));
+
+      // --------------------------------------------------
+      // 🛑 FILTRO ANTI-EVENTOS DE WHATSAPP
+      // --------------------------------------------------
+      const entry = req.body?.entry?.[0];
+      const changes = entry?.changes?.[0];
+      const message = changes?.value?.messages?.[0];
+
+      // Si el evento NO es un mensaje → ignorar
+      if (!message) {
+        console.log("⚠️ Evento ignorado: no es mensaje.");
+        return res.sendStatus(200);
+      }
+
+      // Si el usuario NO envió texto → ignorar
+      if (!message.text?.body) {
+        console.log("⚠️ Evento ignorado: mensaje sin texto.");
+        return res.sendStatus(200);
+      }
+
       return handlerBot(req, res);
     }
 
-    // =========================================
-    // 4️⃣ Otros métodos → No permitido
-    // =========================================
     return res.status(405).send("Method Not Allowed");
 
   } catch (error) {
