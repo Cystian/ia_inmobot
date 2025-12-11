@@ -1,6 +1,14 @@
 // /bot/controllers/propiedadesController.js
 // -------------------------------------------------------
-// Controlador FASE 5.7 — PREMIUM ADAPTATIVO
+// Controlador FASE 5.7 — PREMIUM ADAPTATIVO + RANKING
+// -------------------------------------------------------
+// - Cantidad de resultados según especificidad
+//   • Consulta genérica   → hasta 6 propiedades
+//   • Consulta media      → 4 propiedades
+//   • Consulta específica → 3 propiedades
+//   • Súper específica    → 1 propiedad
+// - Ordena por mejor coincidencia semántica
+//   (tipo + zona + precio + dormitorios + adjetivos)
 // -------------------------------------------------------
 
 import {
@@ -20,15 +28,25 @@ import { FRONTEND_BASE_URL } from "../config/env.js";
 import { MENSAJES } from "../utils/messages.js";
 import { logInfo } from "../utils/log.js";
 
-// --------------------------------------
-// Adaptación de cantidad enviada
-// --------------------------------------
-function calcularItemsPorPagina(filtros, semanticPrefs) {
-  const tieneTipo = !!filtros.tipo;
-  const tieneZona = Array.isArray(filtros.distritos) && filtros.distritos.length > 0;
-  const tienePrecio = filtros.precio_min || filtros.precio_max;
-  const tieneDorms = filtros.bedrooms;
-  const tieneAdjetivos = semanticPrefs?.adjectives?.length > 0;
+// -------------------------------------------------------
+// Detectores de follow-up explícito
+// -------------------------------------------------------
+const FOLLOW_TRIGGERS = [
+  "más opciones","mas opciones",
+  "muestrame mas","muéstrame más",
+  "otra opcion","otra opción",
+  "siguiente","más","mas"
+];
+
+// -------------------------------------------------------
+// Cálculo dinámico de cuántos items enviar
+// -------------------------------------------------------
+function calcularItemsPorPagina(filtros = {}, semanticPrefs = {}) {
+  const tieneTipo     = !!filtros.tipo;
+  const tieneZona     = Array.isArray(filtros.distritos) && filtros.distritos.length > 0;
+  const tienePrecio   = !!filtros.precio_min || !!filtros.precio_max;
+  const tieneDorms    = !!filtros.bedrooms;
+  const tieneAdjetivos = Array.isArray(semanticPrefs.adjectives) && semanticPrefs.adjectives.length > 0;
 
   const especificidad =
     (tieneTipo ? 1 : 0) +
@@ -37,27 +55,97 @@ function calcularItemsPorPagina(filtros, semanticPrefs) {
     (tieneDorms ? 1 : 0) +
     (tieneAdjetivos ? 1 : 0);
 
-  // Consulta muy específica → 2–3 resultados
-  if (especificidad >= 3) return 3;
+  // Súper específica → tipo + zona + (precio o dormitorios) + adjetivos
+  if (especificidad >= 4) return 1; // ✅ SOLO 1 PROPIEDAD
 
-  // Consulta moderada → 4 resultados
+  // Específica pero no extrema
+  if (especificidad === 3) return 3;
+
+  // Moderada
   if (especificidad === 2) return 4;
 
-  // Consulta muy genérica → 6 resultados
+  // Muy genérica
   return 6;
 }
 
+// -------------------------------------------------------
+// Ranking semántico simple (sin IA extra)
+// -------------------------------------------------------
+function scoreProp(p, filtros = {}, semanticPrefs = {}) {
+  let score = 0;
+
+  const title = (p.title || "").toLowerCase();
+  const location = (p.location || "").toLowerCase();
+  const desc = (p.description || "").toLowerCase();
+  const distrib = (p.distribution || "").toLowerCase();
+  const price = Number(p.price) || 0;
+  const beds = Number(p.bedrooms) || 0;
+
+  // 1) Tipo de propiedad
+  if (filtros.tipo) {
+    const t = filtros.tipo.toLowerCase();
+    if (title.includes(t)) score += 6;
+  }
+
+  // 2) Zona / distritos
+  if (Array.isArray(filtros.distritos)) {
+    for (const d of filtros.distritos) {
+      const z = (d || "").toLowerCase();
+      if (z && location.includes(z)) {
+        score += 4;
+      }
+    }
+  }
+
+  // 3) Rango de precio
+  if (filtros.precio_min || filtros.precio_max) {
+    const min = filtros.precio_min ? Number(filtros.precio_min) : null;
+    const max = filtros.precio_max ? Number(filtros.precio_max) : null;
+
+    if ((min && price < min) || (max && price > max)) {
+      score -= 5; // fuera de rango
+    } else {
+      score += 3; // dentro del rango
+    }
+  }
+
+  // 4) Dormitorios
+  if (filtros.bedrooms) {
+    const target = Number(filtros.bedrooms);
+    if (beds >= target) score += 2;
+    if (beds === target) score += 1; // match exacto suma más
+  }
+
+  // 5) Adjetivos semánticos (bonita, amplia, etc.)
+  const adjs = semanticPrefs.adjectives || [];
+  for (const a of adjs) {
+    const adj = a.toLowerCase();
+    if (
+      title.includes(adj) ||
+      desc.includes(adj) ||
+      distrib.includes(adj)
+    ) {
+      score += 1;
+    }
+  }
+
+  return score;
+}
+
+// -------------------------------------------------------
+// CONTROLADOR PRINCIPAL
+// -------------------------------------------------------
 const propiedadesController = {
   async buscar(filtros = {}, contexto = {}) {
     const {
       userPhone,
       session,
       rawMessage,
-      semanticPrefs,
+      semanticPrefs = {},
       esFollowUp
     } = contexto;
 
-    logInfo("BUSCAR PROPIEDADES — CONTROLADOR PREMIUM", {
+    logInfo("BUSCAR PROPIEDADES — CONTROLADOR PREMIUM ADAPTATIVO", {
       filtros,
       rawMessage,
       semanticPrefs,
@@ -69,17 +157,16 @@ const propiedadesController = {
     // ----------------------------------------------------
     // 🔥 Refuerzo de TIPO si el usuario lo menciona
     // ----------------------------------------------------
-    const tipoDetectado = extractTipo(rawMessage);
+    const tipoDetectado = extractTipo(rawMessage || "");
     if (tipoDetectado) {
       filtros.tipo = tipoDetectado;
-      console.log("🔥 Tipo reforzado:", tipoDetectado);
+      console.log("🔥 Tipo reforzado por preTypeExtractor:", tipoDetectado);
     }
 
     // ----------------------------------------------------
-    // 🔍 Búsqueda principal
+    // 🔍 Búsqueda principal (servicio MySQL)
     // ----------------------------------------------------
-    const propiedades = await buscarPropiedades(filtros, semanticPrefs);
-    let allProps = propiedades;
+    let allProps = await buscarPropiedades(filtros, semanticPrefs);
 
     // ----------------------------------------------------
     // ❌ Sin resultados → sugeridas
@@ -111,19 +198,18 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 📄 Calcular cuántos ítems mostrar
+    // 🧠 Ordenar por mejor coincidencia semántica
+    // ----------------------------------------------------
+    allProps = [...allProps].sort(
+      (a, b) => scoreProp(b, filtros, semanticPrefs) - scoreProp(a, filtros, semanticPrefs)
+    );
+
+    // ----------------------------------------------------
+    // 📄 Calcular cuántos ítems mostrar (adaptativo)
     // ----------------------------------------------------
     const ITEMS_PER_PAGE = calcularItemsPorPagina(filtros, semanticPrefs);
 
     let page = esFollowUp ? (session.lastPage || 1) : 1;
-
-    const FOLLOW_TRIGGERS = [
-      "más opciones","mas opciones",
-      "muestrame mas","muéstrame más",
-      "otra opcion","otra opción",
-      "siguiente","más","mas"
-    ];
-
     const isFollowTrigger = FOLLOW_TRIGGERS.some(t => msg.includes(t));
 
     if (isFollowTrigger) {
@@ -154,7 +240,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 🟢 Intro solo la primera vez
+    // 🟢 Intro solo la primera vez (no en follow-up)
     // ----------------------------------------------------
     if (!esFollowUp && !isFollowTrigger) {
       await sendTextPremium(
@@ -165,7 +251,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 🏡 Enviar propiedades
+    // 🏡 Enviar propiedades de la página actual
     // ----------------------------------------------------
     for (const p of propsPagina) {
       const url = `${FRONTEND_BASE_URL}/detalle/${p.id}`;
@@ -211,7 +297,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 💾 Guardar estado
+    // 💾 Guardar estado de la búsqueda
     // ----------------------------------------------------
     updateSession(userPhone, {
       lastIntent: "buscar_propiedades",
