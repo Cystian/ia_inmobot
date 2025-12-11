@@ -145,6 +145,14 @@ const propiedadesController = {
       esFollowUp
     } = contexto;
 
+    // ----------------------------------------------------
+    // 🛑 Filtro para evitar procesar eventos NO textuales
+    // ----------------------------------------------------
+    if (!rawMessage || !rawMessage.trim()) {
+      console.log("⚠️ Evento no textual ignorado.");
+      return null;
+    }
+    
     const msg = (rawMessage || "").toLowerCase();
 
     logInfo("BUSCAR PROPIEDADES — CONTROLADOR PREMIUM ADAPTATIVO", {
