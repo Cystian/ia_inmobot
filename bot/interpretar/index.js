@@ -46,6 +46,15 @@ const KW_INVERSION = [
 ];
 
 export default async function interpretar(userMessage = "", userPhone = "") {
+
+  // --------------------------------------------------
+  // 🛑 FILTRO ANTI-MENSAJE VACÍO / EVENTO DE WHATSAPP
+  // --------------------------------------------------
+  if (!userMessage || !userMessage.trim()) {
+    console.log("⚠️ interpretar(): mensaje vacío ignorado.");
+    return null;
+  }
+  
   // ======================================================
   // 0️⃣ LIMPIEZA PROFESIONAL ANTES QUE TODO
   // ======================================================
