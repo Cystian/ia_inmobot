@@ -57,14 +57,8 @@ function calcularItemsPorPagina(filtros = {}, semanticPrefs = {}) {
 
   // Súper específica → tipo + zona + (precio o dormitorios) + adjetivos
   if (especificidad >= 4) return 1; // ✅ SOLO 1 PROPIEDAD
-
-  // Específica pero no extrema
   if (especificidad === 3) return 3;
-
-  // Moderada
   if (especificidad === 2) return 4;
-
-  // Muy genérica
   return 6;
 }
 
@@ -74,12 +68,12 @@ function calcularItemsPorPagina(filtros = {}, semanticPrefs = {}) {
 function scoreProp(p, filtros = {}, semanticPrefs = {}) {
   let score = 0;
 
-  const title   = (p.title || "").toLowerCase();
+  const title    = (p.title || "").toLowerCase();
   const location = (p.location || "").toLowerCase();
-  const desc    = (p.description || "").toLowerCase();
-  const distrib = (p.distribution || "").toLowerCase();
-  const price   = Number(p.price) || 0;
-  const beds    = Number(p.bedrooms) || 0;
+  const desc     = (p.description || "").toLowerCase();
+  const distrib  = (p.distribution || "").toLowerCase();
+  const price    = Number(p.price) || 0;
+  const beds     = Number(p.bedrooms) || 0;
 
   // 1) Tipo de propiedad
   if (filtros.tipo) {
@@ -91,9 +85,7 @@ function scoreProp(p, filtros = {}, semanticPrefs = {}) {
   if (Array.isArray(filtros.distritos)) {
     for (const d of filtros.distritos) {
       const z = (d || "").toLowerCase();
-      if (z && location.includes(z)) {
-        score += 4;
-      }
+      if (z && location.includes(z)) score += 4;
     }
   }
 
@@ -102,29 +94,22 @@ function scoreProp(p, filtros = {}, semanticPrefs = {}) {
     const min = filtros.precio_min ? Number(filtros.precio_min) : null;
     const max = filtros.precio_max ? Number(filtros.precio_max) : null;
 
-    if ((min && price < min) || (max && price > max)) {
-      score -= 5; // fuera de rango
-    } else {
-      score += 3; // dentro del rango
-    }
+    if ((min && price < min) || (max && price > max)) score -= 5;
+    else score += 3;
   }
 
   // 4) Dormitorios
   if (filtros.bedrooms) {
     const target = Number(filtros.bedrooms);
     if (beds >= target) score += 2;
-    if (beds === target) score += 1; // match exacto suma más
+    if (beds === target) score += 1;
   }
 
-  // 5) Adjetivos semánticos (bonita, amplia, etc.)
+  // 5) Adjetivos semánticos
   const adjs = semanticPrefs.adjectives || [];
   for (const a of adjs) {
     const adj = a.toLowerCase();
-    if (
-      title.includes(adj) ||
-      desc.includes(adj) ||
-      distrib.includes(adj)
-    ) {
+    if (title.includes(adj) || desc.includes(adj) || distrib.includes(adj)) {
       score += 1;
     }
   }
@@ -152,7 +137,7 @@ const propiedadesController = {
       console.log("⚠️ Evento no textual ignorado.");
       return null;
     }
-    
+
     const msg = (rawMessage || "").toLowerCase();
 
     logInfo("BUSCAR PROPIEDADES — CONTROLADOR PREMIUM ADAPTATIVO", {
@@ -165,10 +150,11 @@ const propiedadesController = {
     const isFollowTrigger = FOLLOW_TRIGGERS.some(t => msg.includes(t));
     const lastPageInSession = session.lastPage || 1;
 
+    // ✅ FLAG para evitar doble intro (default vs sugeridas)
+    let introYaEnviado = false;
+
     // ----------------------------------------------------
     // 🔥 Refuerzo de TIPO si el usuario lo menciona
-    // (solo en primera búsqueda; en un "más opciones" ya
-    // deberíamos respetar los filtros previos)
     // ----------------------------------------------------
     if (!isFollowTrigger) {
       const tipoDetectado = extractTipo(rawMessage || "");
@@ -180,22 +166,34 @@ const propiedadesController = {
 
     // ----------------------------------------------------
     // 🔍 Búsqueda principal (servicio MySQL)
-    // (si es follow-up y no decimos lo contrario, igual
-    // volvemos a consultar para traer data fresca)
     // ----------------------------------------------------
     let allProps = await buscarPropiedades(filtros, semanticPrefs);
 
     // ----------------------------------------------------
-    // ❌ Sin resultados → sugeridas
+    // ❌ Sin resultados → sugeridas (PATCH: sin doble mensaje)
     // ----------------------------------------------------
     if (allProps.length === 0) {
+      const sugeridas = await buscarSugeridas(filtros);
+
+      // Si tampoco hay sugeridas: 1 solo mensaje y corte limpio
+      if (!sugeridas || sugeridas.length === 0) {
+        await sendTextPremium(
+          userPhone,
+          "No encontré coincidencias para esa búsqueda 😕.\n¿Prefieres ampliar *zona* o ajustar *presupuesto*?",
+          session
+        );
+        return null;
+      }
+
+      // Si sí hay sugeridas: recién comunicamos y continuamos
       await sendTextPremium(
         userPhone,
         MENSAJES.intro_propiedades_sugeridas,
         session
       );
 
-      allProps = await buscarSugeridas(filtros);
+      introYaEnviado = true;
+      allProps = sugeridas;
 
       updateSession(userPhone, {
         lastIntent: "buscar_propiedades",
@@ -203,15 +201,6 @@ const propiedadesController = {
         lastProperties: allProps,
         lastPage: 1
       });
-
-      if (allProps.length === 0) {
-        await sendTextPremium(
-          userPhone,
-          "No encontré opciones exactas, pero puedo ajustar zona o presupuesto 😊.",
-          session
-        );
-        return null;
-      }
     }
 
     // ----------------------------------------------------
@@ -232,7 +221,6 @@ const propiedadesController = {
     let page = 1;
 
     if (isFollowTrigger) {
-      // Usuario explícitamente pidió "más"
       page = lastPageInSession + 1;
 
       await sendTextPremium(
@@ -241,10 +229,8 @@ const propiedadesController = {
         session
       );
     } else if (esFollowUp) {
-      // Follow-up interno sin trigger textual
       page = lastPageInSession;
     } else {
-      // Primera búsqueda
       page = 1;
     }
 
@@ -275,8 +261,9 @@ const propiedadesController = {
 
     // ----------------------------------------------------
     // 🟢 Intro solo la primera vez (no en follow-up)
+    // PATCH: evita duplicar si ya se envió intro de sugeridas
     // ----------------------------------------------------
-    if (!esFollowUp && !isFollowTrigger) {
+    if (!introYaEnviado && !esFollowUp && !isFollowTrigger) {
       await sendTextPremium(
         userPhone,
         MENSAJES.intro_propiedades_default,
@@ -287,7 +274,6 @@ const propiedadesController = {
     // ----------------------------------------------------
     // 🏡 Enviar propiedades de la página actual (ordenadas)
     // ----------------------------------------------------
-    // Normalizamos FRONTEND_BASE_URL para evitar //detalle/...
     const baseUrl = (FRONTEND_BASE_URL || "").replace(/\/+$/, "");
 
     for (const p of propsPagina) {
@@ -353,3 +339,4 @@ const propiedadesController = {
 };
 
 export default propiedadesController;
+
