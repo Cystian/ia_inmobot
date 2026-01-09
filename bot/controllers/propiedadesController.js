@@ -2,14 +2,6 @@
 // -------------------------------------------------------
 // Controlador FASE 5.7 — PREMIUM ADAPTATIVO + RANKING
 // -------------------------------------------------------
-// - Cantidad de resultados según especificidad
-//   • Consulta genérica   → hasta 6 propiedades
-//   • Consulta media      → 4 propiedades
-//   • Consulta específica → 3 propiedades
-//   • Súper específica    → 1 propiedad
-// - Ordena por mejor coincidencia semántica
-//   (tipo + zona + precio + dormitorios + adjetivos)
-// -------------------------------------------------------
 
 import {
   buscarPropiedades,
@@ -38,6 +30,11 @@ const FOLLOW_TRIGGERS = [
   "siguiente", "más", "mas"
 ];
 
+// Helper: retorno estándar para evitar fallback fantasma
+function handled(reason = "handled") {
+  return { handled: true, reason };
+}
+
 // -------------------------------------------------------
 // Cálculo dinámico de cuántos items enviar
 // -------------------------------------------------------
@@ -55,8 +52,7 @@ function calcularItemsPorPagina(filtros = {}, semanticPrefs = {}) {
     (tieneDorms ? 1 : 0) +
     (tieneAdjetivos ? 1 : 0);
 
-  // Súper específica → tipo + zona + (precio o dormitorios) + adjetivos
-  if (especificidad >= 4) return 1; // ✅ SOLO 1 PROPIEDAD
+  if (especificidad >= 4) return 1;
   if (especificidad === 3) return 3;
   if (especificidad === 2) return 4;
   return 6;
@@ -131,11 +127,12 @@ const propiedadesController = {
     } = contexto;
 
     // ----------------------------------------------------
-    // 🛑 Filtro para evitar procesar eventos NO textuales
+    // 🛑 Evitar eventos NO textuales (y marcar handled)
     // ----------------------------------------------------
     if (!rawMessage || !rawMessage.trim()) {
       console.log("⚠️ Evento no textual ignorado.");
-      return null;
+      updateSession(userPhone, { lastBotAction: "ignored_non_text" });
+      return handled("ignored_non_text");
     }
 
     const msg = (rawMessage || "").toLowerCase();
@@ -170,19 +167,29 @@ const propiedadesController = {
     let allProps = await buscarPropiedades(filtros, semanticPrefs);
 
     // ----------------------------------------------------
-    // ❌ Sin resultados → sugeridas (PATCH: sin doble mensaje)
+    // ❌ Sin resultados → sugeridas (sin doble mensaje)
     // ----------------------------------------------------
     if (allProps.length === 0) {
       const sugeridas = await buscarSugeridas(filtros);
 
-      // Si tampoco hay sugeridas: 1 solo mensaje y corte limpio
+      // Si tampoco hay sugeridas: 1 solo mensaje, cortar y marcar handled
       if (!sugeridas || sugeridas.length === 0) {
         await sendTextPremium(
           userPhone,
           "No encontré coincidencias para esa búsqueda 😕.\n¿Prefieres ampliar *zona* o ajustar *presupuesto*?",
           session
         );
-        return null;
+
+        updateSession(userPhone, {
+          lastIntent: "buscar_propiedades",
+          lastFilters: filtros,
+          lastProperties: [],
+          lastPage: 1,
+          semanticPrefs,
+          lastBotAction: "no_results"
+        });
+
+        return handled("no_results");
       }
 
       // Si sí hay sugeridas: recién comunicamos y continuamos
@@ -199,7 +206,9 @@ const propiedadesController = {
         lastIntent: "buscar_propiedades",
         lastFilters: filtros,
         lastProperties: allProps,
-        lastPage: 1
+        lastPage: 1,
+        semanticPrefs,
+        lastBotAction: "sugeridas_sent"
       });
     }
 
@@ -255,13 +264,16 @@ const propiedadesController = {
         session
       );
 
-      updateSession(userPhone, { lastPage: page });
-      return null;
+      updateSession(userPhone, {
+        lastPage: page,
+        lastBotAction: "no_more_results"
+      });
+
+      return handled("no_more_results");
     }
 
     // ----------------------------------------------------
     // 🟢 Intro solo la primera vez (no en follow-up)
-    // PATCH: evita duplicar si ya se envió intro de sugeridas
     // ----------------------------------------------------
     if (!introYaEnviado && !esFollowUp && !isFollowTrigger) {
       await sendTextPremium(
@@ -272,7 +284,7 @@ const propiedadesController = {
     }
 
     // ----------------------------------------------------
-    // 🏡 Enviar propiedades de la página actual (ordenadas)
+    // 🏡 Enviar propiedades de la página actual
     // ----------------------------------------------------
     const baseUrl = (FRONTEND_BASE_URL || "").replace(/\/+$/, "");
 
@@ -331,12 +343,12 @@ const propiedadesController = {
       lastFilters: filtros,
       lastProperties: allProps,
       lastPage: page,
-      semanticPrefs
+      semanticPrefs,
+      lastBotAction: "results_sent"
     });
 
-    return null;
+    return handled("results_sent");
   }
 };
 
 export default propiedadesController;
-
