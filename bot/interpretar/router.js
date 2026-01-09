@@ -1,10 +1,6 @@
 // /bot/interpretar/router.js
 // -------------------------------------------------------
 // Router oficial FASE 5.7
-// • Corrección de loops y mensajes duplicados
-// • Manejo refinado de pregunta_propiedad
-// • Follow-up inteligente alineado a IntentClassifier 5.7
-// • Secuencia limpia y profesional
 // -------------------------------------------------------
 
 import propiedadesController from "../controllers/propiedadesController.js";
@@ -13,6 +9,10 @@ import ayudaController from "../controllers/ayudaController.js";
 import detallePropiedadController from "../controllers/detallePropiedadController.js";
 import inversionController from "../controllers/inversionController.js";
 import { MENSAJES } from "../utils/messages.js";
+
+function handled(reason = "handled") {
+  return { handled: true, reason };
+}
 
 export async function routeIntent(intencion, filtros, contexto = {}) {
   const { esFollowUp, session = {}, userPhone } = contexto;
@@ -36,14 +36,15 @@ Voy a analizar tus datos y prepararte opciones ideales según tu presupuesto.
     const prev = session.lastIntent || "buscar_propiedades";
 
     switch (prev) {
-      case "buscar_propiedades":
-        return propiedadesController.buscar(filtros, {
+      case "buscar_propiedades": {
+        const out = await propiedadesController.buscar(filtros, {
           ...contexto,
           esFollowUp: true
         });
+        return out ?? handled("followup_buscar_propiedades");
+      }
 
       case "pregunta_propiedad":
-        // Follow-up sobre una propiedad → más detalles
         return detallePropiedadController.responder(contexto);
 
       case "inversion":
@@ -61,29 +62,26 @@ Voy a analizar tus datos y prepararte opciones ideales según tu presupuesto.
   // 2️⃣ INTENCIONES PRINCIPALES
   // ==============================================
   switch (intencion) {
-    // 🔍 BÚSQUEDA
-    case "buscar_propiedades":
-      return propiedadesController.buscar(filtros, contexto);
+    case "buscar_propiedades": {
+      const out = await propiedadesController.buscar(filtros, contexto);
+      return out ?? handled("buscar_propiedades_handled");
+    }
 
-    // 👋 SALUDO
     case "saludo":
     case "saludo_simple":
-      if (session.hasGreeted) return null;
+      // ⚠️ antes retornabas null, eso puede gatillar fallback arriba
+      if (session.hasGreeted) return handled("already_greeted");
       return saludoController.saludar();
 
-    // 🏡 DETALLE DE PROPIEDAD
     case "pregunta_propiedad":
       return detallePropiedadController.responder(contexto);
 
-    // 📈 INVERSIÓN
     case "inversion":
       return inversionController.recomendar(filtros, contexto);
 
-    // 👋 DESPEDIDA
     case "despedida":
       return MENSAJES.despedida;
 
-    // ❓ FALLBACK CORPORATIVO
     default:
       return ayudaController.generica(contexto);
   }
